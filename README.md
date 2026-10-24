@@ -26,8 +26,8 @@ npm run snip -- list              # 看有哪些片段（已迁移 Termius 的 1
 npm run snip -- status            # 探活：bridge up / down
 npm run snip -- run check-instence
 
-npm run dev:server                # http://127.0.0.1:8787
-npm run dev:web                   # http://127.0.0.1:5173（/api 代理到 8787）
+npm run dev:server                # http://127.0.0.1:7878
+npm run dev:web                   # http://127.0.0.1:5173（/api 代理到 7878）
 npm run build:web                 # 构建后由 server 直接托管
 ```
 
@@ -53,7 +53,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-server.ps1
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `SNIPDECK_HOST` | `127.0.0.1` | 改 Tailscale IP 手机才能访问，此时必须配 token |
-| `SNIPDECK_PORT` | `8787` | 与 TxtTunnel 默认端口相同 |
+| `SNIPDECK_PORT` | `7878` | 避开 TxtTunnel 的 8787 |
 | `SNIP_TOKEN` | 空 | 非 loopback 访问的 Bearer token |
 | `SNIPDECK_DATA` / `SNIPDECK_WEB_DIST` | `data` / `packages/web/dist` | 一般不用改 |
 

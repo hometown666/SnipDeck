@@ -1,6 +1,6 @@
 import { buildApp } from './app'
 
-const PORT = Number(process.env.SNIPDECK_PORT ?? 8787)
+const PORT = Number(process.env.SNIPDECK_PORT ?? 7878)
 const HOST = process.env.SNIPDECK_HOST ?? '127.0.0.1'
 const TOKEN = process.env.SNIP_TOKEN ?? ''
 

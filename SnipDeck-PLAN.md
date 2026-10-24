@@ -259,7 +259,7 @@ steps:
 
 ```yaml
 vars:
-  port:  { default: 8787, prompt: 端口 }
+  port:  { default: 7878, prompt: 端口 }
   flag:  { choices: [0, 1, 2], default: 0, prompt: 模式 }   # ← Focus&Click 的 set flag=（0,1,2）
   token: { secret: true, from: env:SNIP_TOKEN }
 ```
@@ -428,7 +428,7 @@ remote text control/                 # 仓库根
 
 ## 12. 待定项
 
-已定：代号 `SnipDeck` / 「片段坞」；端口 `8787`；`data/tmp` 保留 7 天；danger 片段必须二次确认且默认展示预览。
+已定：代号 `SnipDeck` / 「片段坞」；端口 `7878`（避开 TxtTunnel 的 8787）；`data/tmp` 保留 7 天；danger 片段必须二次确认且默认展示预览。
 
 仍待定：
 
@@ -528,7 +528,7 @@ remote text control/                 # 仓库根
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
 | `SNIPDECK_HOST` | `127.0.0.1` | 非 loopback 时必须配 token，否则拒绝启动 |
-| `SNIPDECK_PORT` | `8787` | 与 TxtTunnel 默认端口相同，同时跑要改 |
+| `SNIPDECK_PORT` | `7878` | 避开 TxtTunnel 的 8787，两个可同时跑 |
 | `SNIP_TOKEN` | 空 | Bearer 准入 token |
 | `SNIPDECK_DATA` | `data` | 数据目录 |
 | `SNIPDECK_WEB_DIST` | `packages/web/dist` | 不存在则只提供 API |

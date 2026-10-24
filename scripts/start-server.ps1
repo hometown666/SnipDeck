@@ -22,7 +22,7 @@ if (Test-Path '.env') {
 }
 
 if (-not $env:SNIPDECK_HOST) { $env:SNIPDECK_HOST = '127.0.0.1' }
-if (-not $env:SNIPDECK_PORT) { $env:SNIPDECK_PORT = '8787' }
+if (-not $env:SNIPDECK_PORT) { $env:SNIPDECK_PORT = '7878' }
 
 $logDir = Join-Path $root 'data\logs'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
