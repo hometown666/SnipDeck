@@ -39,6 +39,11 @@ const cases: { name: string; cmd: string; expect: (r: RunOut) => boolean; detail
   { name: '引号直传', cmd: 'echo "a b"', expect: (r) => r.out === '"a b"' },
   { name: '管道', cmd: 'echo a|findstr a', expect: (r) => r.out === 'a' },
   { name: '多行脚本', cmd: 'echo one\r\necho two', expect: (r) => r.out.includes('one') && r.out.includes('two') },
+  {
+    name: '多行 if 块（LF 输入）',
+    cmd: 'if 1 equ 1 (\n  echo yes\n) else (\n  echo no\n)',
+    expect: (r) => r.ok && r.out === 'yes',
+  },
   { name: '非零退出码', cmd: 'exit /b 3', expect: (r) => !r.ok && r.code === 3 },
 ]
 

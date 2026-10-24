@@ -1,8 +1,27 @@
 {
+  "id": "./",
   "name": "SnipDeck 片段坞",
   "short_name": "SnipDeck",
+  "description": "自托管的片段库 + 跨设备执行工作台",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#f7f7f5",
-  "theme_color": "#0F6E56"
+  "theme_color": "#0F6E56",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
 }

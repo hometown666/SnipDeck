@@ -1,33 +1,106 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api, type RunEvent, type SnippetView } from './api'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ApiError, api, getToken, setToken, type HealthView, type RunEvent, type SnippetView } from './api'
 
 type VarDraft = Record<string, string>
-type Output = { id: string; lines: string[]; running: boolean; ok?: boolean }
+type Output = {
+  id: string
+  lines: string[]
+  running: boolean
+  ok?: boolean
+  startedAt: number
+  durationMs?: number
+  timedOut?: boolean
+}
 type Draft = { snippet: SnippetView; vars: VarDraft; confirmed: boolean }
+
+const MAX_LINES = 2000
+const ANSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g
+
+function clean(text: string): string {
+  return text.replace(ANSI_RE, '').replace(/\r\n/g, '\n').replace(/\n$/, '')
+}
 
 export function App() {
   const [snippets, setSnippets] = useState<SnippetView[]>([])
-  const [health, setHealth] = useState<{ bridgeUp: boolean; queue: number } | null>(null)
+  const [health, setHealth] = useState<HealthView | null>(null)
   const [q, setQ] = useState('')
   const [draft, setDraft] = useState<Draft | null>(null)
   const [preview, setPreview] = useState<string[] | null>(null)
   const [danger, setDanger] = useState<SnippetView | null>(null)
   const [output, setOutput] = useState<Output | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
+  const [needToken, setNeedToken] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [tokenInput, setTokenInput] = useState('')
+  const [tokenError, setTokenError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [tick, setTick] = useState(0)
+
+  const bodyRef = useRef<HTMLPreElement | null>(null)
 
   const refresh = useCallback(async () => {
     try {
       const [list, h] = await Promise.all([api.snippets(), api.health()])
       setSnippets(list)
-      setHealth({ bridgeUp: h.bridgeUp, queue: h.queue })
+      setHealth(h)
+      setNeedToken(false)
     } catch (e) {
-      console.error(e)
+      if (e instanceof ApiError && e.status === 401) setNeedToken(true)
+      else console.error(e)
     }
   }, [])
 
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  // 队列/桥状态轮询：页面隐藏时停掉，回来立刻刷一次
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (document.hidden) return
+      api
+        .health()
+        .then(setHealth)
+        .catch(() => undefined)
+    }, 4000)
+    const onVisible = () => {
+      if (!document.hidden) void refresh()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [refresh])
+
+  // 运行中的计时
+  useEffect(() => {
+    if (!output?.running) return
+    const t = setInterval(() => setTick((n) => n + 1), 200)
+    return () => clearInterval(t)
+  }, [output?.running])
+
+  // 输出自动滚到底
+  useEffect(() => {
+    const el = bodyRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [output?.lines.length, output?.running])
+
+  // Esc 关最上层
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (showSettings || needToken) {
+        setShowSettings(false)
+        return
+      }
+      if (draft) return setDraft(null)
+      if (danger) return setDanger(null)
+      if (output) setOutput(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [draft, danger, output, showSettings, needToken])
 
   const groups = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -65,33 +138,39 @@ export function App() {
   }
 
   async function doRun(s: SnippetView, vars: VarDraft, confirmed: boolean) {
-    setOutput({ id: s.id, lines: [`→ ${s.id}`], running: true })
+    setOutput({ id: s.id, lines: [`→ ${s.id}`], running: true, startedAt: Date.now() })
     setDraft(null)
     setDanger(null)
     setFormError(null)
+    setCopied(false)
     try {
       await api.run(s.id, vars, confirmed, (ev: RunEvent) => {
         setOutput((o) => {
           if (!o) return o
-          const lines = [...o.lines]
+          const extra: string[] = []
+          let { running, ok, durationMs, timedOut } = o
           switch (ev.type) {
             case 'start':
-              if (ev.cmd && !ev.cmd.startsWith('[')) lines.push(`$ ${ev.cmd}`)
+              if (ev.cmd && !ev.cmd.startsWith('[')) extra.push(`$ ${ev.cmd}`)
               break
             case 'queued':
-              lines.push(`⏳ 队列等待 ${(ev.waitedMs / 1000).toFixed(1)}s`)
+              extra.push(`⏳ 队列等待 ${(ev.waitedMs / 1000).toFixed(1)}s`)
               break
             case 'stdout':
-              lines.push(ev.data.replace(/\n$/, ''))
+              extra.push(clean(ev.data))
               break
             case 'stderr':
-              lines.push(`[stderr] ${ev.data.replace(/\n$/, '')}`)
+              extra.push(`[stderr] ${clean(ev.data)}`)
               break
             case 'step':
-              lines.push(`✓ step${ev.stepIndex} exit=${ev.exitCode ?? '-'} ${ev.durationMs}ms`)
+              extra.push(`✓ step${ev.stepIndex} exit=${ev.exitCode ?? '-'} ${ev.durationMs}ms`)
               break
             case 'exit':
-              lines.push(
+              running = false
+              ok = ev.ok
+              durationMs = ev.durationMs
+              timedOut = ev.timedOut
+              extra.push(
                 ev.ok
                   ? `✓ done ${ev.durationMs}ms`
                   : ev.timedOut
@@ -100,19 +179,28 @@ export function App() {
               )
               break
             case 'error':
-              lines.push(`ERROR ${ev.message}`)
+              running = false
+              ok = false
+              extra.push(`ERROR ${ev.message}`)
               break
           }
           return {
             ...o,
-            lines,
-            running: ev.type !== 'exit' && ev.type !== 'error',
-            ok: ev.type === 'exit' ? ev.ok : o.ok,
+            lines: [...o.lines, ...extra].slice(-MAX_LINES),
+            running,
+            ok,
+            durationMs,
+            timedOut,
           }
         })
       })
     } catch (e) {
-      setOutput((o) => (o ? { ...o, lines: [...o.lines, `ERROR ${String(e)}`], running: false, ok: false } : o))
+      if (e instanceof ApiError && e.status === 401) setNeedToken(true)
+      setOutput((o) =>
+        o
+          ? { ...o, lines: [...o.lines, `ERROR ${String(e)}`].slice(-MAX_LINES), running: false, ok: false }
+          : o,
+      )
     }
   }
 
@@ -138,6 +226,42 @@ export function App() {
     }
   }
 
+  async function copyOutput() {
+    if (!output) return
+    const text = output.lines.join('\n')
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      ta.remove()
+    }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1200)
+  }
+
+  async function saveToken() {
+    setToken(tokenInput.trim())
+    try {
+      const h = await api.health()
+      setHealth(h)
+      setNeedToken(false)
+      setShowSettings(false)
+      setTokenError(null)
+      void refresh()
+    } catch {
+      setTokenError('token 不对，或服务端未设置 SNIP_TOKEN')
+    }
+  }
+
+  const elapsed = output ? (output.running ? Date.now() - output.startedAt : output.durationMs ?? 0) : 0
+  void tick
+  const tokenSet = !!getToken()
+  const settingsOpen = showSettings || needToken
+
   return (
     <div className="app">
       <header className="topbar">
@@ -146,12 +270,27 @@ export function App() {
           <span className="name">SnipDeck</span>
         </div>
         <div className="topbar-right">
-          <span className={`badge ${health?.bridgeUp ? 'up' : 'down'}`}>
+          <span className={`badge ${health?.bridgeUp ? 'up' : 'down'}`} title="AHK 桥状态">
             {health === null ? '…' : health.bridgeUp ? 'bridge up' : 'bridge down'}
-            {health && health.queue > 0 ? ` · q${health.queue}` : ''}
           </span>
-          <button className="icon-btn" onClick={() => void refresh()} aria-label="refresh">
+          {health && health.queue > 0 ? (
+            <span className="badge queue" title="桥单车道队列长度">
+              排队 {health.queue}
+            </span>
+          ) : null}
+          <button className="icon-btn" onClick={() => void refresh()} aria-label="刷新">
             ⟳
+          </button>
+          <button
+            className={`icon-btn${tokenSet ? ' on' : ''}`}
+            onClick={() => {
+              setTokenInput(getToken())
+              setTokenError(null)
+              setShowSettings(true)
+            }}
+            aria-label="设置"
+          >
+            ⚙
           </button>
         </div>
       </header>
@@ -159,23 +298,36 @@ export function App() {
       <div className="searchbar">
         <input
           type="search"
-          placeholder="搜索片段…"
+          placeholder="搜索片段（id / 标题 / 分组 / 标签）…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
       </div>
 
+      {needToken && (
+        <div className="banner">
+          这台设备还没有 token，先填一次才能执行片段。
+          <button className="link" onClick={() => setShowSettings(true)}>去填写</button>
+        </div>
+      )}
+
       <main className="groups">
         {groups.map(([g, items]) => (
           <section key={g} className="group">
-            <h2>{g}</h2>
+            <h2>
+              {g} <em>{items.length}</em>
+            </h2>
             <div className="cards">
               {items.map((s) => (
-                <button key={s.id} className={`card${s.danger ? ' danger' : ''}`} onClick={() => openSnippet(s)}>
+                <button
+                  key={s.id}
+                  className={`card${s.danger ? ' danger' : ''}`}
+                  onClick={() => openSnippet(s)}
+                >
                   <span className="card-title">{s.title}</span>
                   <span className="card-meta">
                     {s.id}
-                    {Object.keys(s.vars).length > 0 ? ' · 有变量' : ''}
+                    {Object.keys(s.vars).length > 0 ? ` · ${Object.keys(s.vars).length} 个变量` : ''}
                     {s.danger ? ' · danger' : ''}
                   </span>
                 </button>
@@ -190,7 +342,10 @@ export function App() {
         <div className="modal-mask" onClick={() => setDraft(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>{draft.snippet.title}</h3>
-            <p className="modal-sub">{draft.snippet.id}</p>
+            <p className="modal-sub">
+              {draft.snippet.id}
+              {draft.snippet.target ? ` · ${draft.snippet.target}` : ''} · {draft.snippet.steps} 步
+            </p>
             {Object.entries(draft.snippet.vars).map(([k, v]) => (
               <label key={k} className="field">
                 <span>
@@ -198,9 +353,14 @@ export function App() {
                   {v.required ? <em className="req"> *</em> : null}
                 </span>
                 {v.choices ? (
-                  <select value={draft.vars[k] ?? ''} onChange={(e) => setDraft({ ...draft, vars: { ...draft.vars, [k]: e.target.value } })}>
+                  <select
+                    value={draft.vars[k] ?? ''}
+                    onChange={(e) => setDraft({ ...draft, vars: { ...draft.vars, [k]: e.target.value } })}
+                  >
                     {v.choices.map((c) => (
-                      <option key={String(c)} value={String(c)}>{String(c) || '(空)'}</option>
+                      <option key={String(c)} value={String(c)}>
+                        {String(c) || '(空)'}
+                      </option>
                     ))}
                   </select>
                 ) : (
@@ -213,9 +373,7 @@ export function App() {
                 )}
               </label>
             ))}
-            {preview && (
-              <pre className="preview">{preview.map((c) => `$ ${c}`).join('\n')}</pre>
-            )}
+            {preview && <pre className="preview">{preview.map((c) => `$ ${c}`).join('\n')}</pre>}
             {formError && <p className="form-error">{formError}</p>}
             <div className="modal-actions">
               <button className="btn ghost" onClick={() => void loadPreview()}>预览命令</button>
@@ -248,16 +406,56 @@ export function App() {
         </div>
       )}
 
+      {settingsOpen && (
+        <div className="modal-mask" onClick={() => setShowSettings(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>访问 token</h3>
+            <p className="modal-sub">
+              服务端设了 <code>SNIP_TOKEN</code> 时，非本机访问需要它。只存在这台设备的 localStorage。
+            </p>
+            <label className="field">
+              <span>SNIP_TOKEN</span>
+              <input
+                type="password"
+                value={tokenInput}
+                placeholder={tokenSet ? '已保存（重新输入可覆盖）' : '粘贴 token'}
+                onChange={(e) => setTokenInput(e.target.value)}
+              />
+            </label>
+            {tokenError && <p className="form-error">{tokenError}</p>}
+            <div className="modal-actions">
+              <button
+                className="btn ghost"
+                onClick={() => {
+                  setToken('')
+                  setTokenInput('')
+                  setShowSettings(false)
+                  void refresh()
+                }}
+              >
+                清除
+              </button>
+              <button className="btn primary" onClick={() => void saveToken()}>保存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {output && (
         <div className={`drawer${output.running ? ' running' : output.ok ? ' ok' : ' fail'}`}>
           <div className="drawer-head">
-            <span>{output.id}</span>
+            <span className="drawer-id">{output.id}</span>
             <span className="drawer-status">
-              {output.running ? '运行中…' : output.ok ? '完成' : '失败'}
+              {output.running ? `运行中 ${(elapsed / 1000).toFixed(1)}s` : output.ok ? `完成 ${((output.durationMs ?? 0) / 1000).toFixed(1)}s` : output.timedOut ? '超时' : '失败'}
             </span>
-            <button className="icon-btn" onClick={() => setOutput(null)} aria-label="close">×</button>
+            <span className="drawer-tools">
+              <button className="icon-btn" onClick={() => void copyOutput()} aria-label="复制输出">
+                {copied ? '✓' : '⧉'}
+              </button>
+              <button className="icon-btn" onClick={() => setOutput(null)} aria-label="关闭">×</button>
+            </span>
           </div>
-          <pre className="drawer-body">{output.lines.join('\n')}</pre>
+          <pre className="drawer-body" ref={bodyRef}>{output.lines.join('\n')}</pre>
         </div>
       )}
     </div>

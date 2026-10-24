@@ -1,5 +1,5 @@
 id: cursor-refill
-title: Cursor 续杯（Focus & Click）
+title: Cursor 续杯（Focus & Click）· 骨架待补
 group: 实例控制
 target: win-desktop
 shell: cmd
@@ -7,15 +7,30 @@ tags: [gui, cursor, admin]
 danger: true
 meta:
   source: termius-command
-  status: 待确认
-  note: >
-    原 Termius 命令在截图里被截断，只剩 `set flag=（0,1,2）&& if %flag% equ 2 (call C:\ahk_trigg…`。
-    这里保留可确认的结构：flag==2 才执行动作，其它值为 no-op（因此默认不会误动作）。
-    待确认两点：(1) flag 取值语义；(2) 被 call 的目标是否 `admin lnk cursor续杯工具`。
+  status: 骨架（等填）
+  original: 'set flag=（0,1,2）&& if %flag% equ 2 (call C:\ahk_trigg…  ← 截图截断'
+  howto: |
+    1. 三个分支各留了一行 `rem TODO`，把对应分支换成真实命令即可（删掉那行 rem）。
+    2. flag 语义：0 / 1 / 2 分别代表什么？原片段只确认了 `equ 2` 会去 call。
+    3. 被 call 的目标：现在写的是 `admin lnk cursor续杯工具`（按文档推断，未证实）。
+       若原片段是 focus + click 两步，按顺序加 step：
+         - { do: run, cmd: 'call C:\ahk_trigger\ahk.bat focus <slot>' }
+         - { do: run, cmd: 'call C:\ahk_trigger\ahk.bat click <slot> <x> <y>' }
+    4. 改完保存即热更新，不用重启；CLI 可用 `snip run cursor-refill --var flag=2` 试。
+  safety: 默认 flag=0，三个分支目前都是空转，不会误动作。
 vars:
   flag: { prompt: 模式, choices: [0, 1, 2], default: 0 }
 steps:
   - do: run
-    cmd: 'if {{flag}} equ 2 (call C:\ahk_trigger\ahk.bat admin lnk cursor续杯工具)'
+    cmd: |
+      if {{flag}} equ 0 (
+        rem TODO flag=0（原片段此分支未知；留空 = 什么都不做）
+      ) else if {{flag}} equ 1 (
+        rem TODO flag=1（原片段此分支未知；留空 = 什么都不做）
+      ) else if {{flag}} equ 2 (
+        call C:\ahk_trigger\ahk.bat admin lnk cursor续杯工具
+      ) else (
+        echo [cursor-refill] 未知 flag={{flag}}
+      )
     timeout: 30
     optional: true

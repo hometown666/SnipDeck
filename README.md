@@ -59,6 +59,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-server.ps1
 
 日志：`data/logs/server.log`（同一时间只允许一个实例，第二条会报「文件被占用」）。
 
+## 手机 / PWA
+
+1. 服务端监听 Tailscale 地址并设 token；
+2. 手机浏览器打开 `http://100.x.x.x:7878`；
+3. 第一次会弹横幅要 token —— 点右上角 ⚙ 粘贴一次，存在这台设备的 localStorage；
+4. 「添加到主屏幕」即可当应用用。
+
+> **关于离线**：service worker 只在安全上下文注册。经 `http://100.x` 访问时浏览器会跳过，
+> 此时是「快捷方式」而不是完整 PWA；要离线缓存与安装提示，需要 `tailscale serve` 上 HTTPS。
+
 ## 写一条片段
 
 放在 `data/snippets/<分组>/<名字>.yaml`，目录就是分组：
@@ -130,6 +140,7 @@ npm test     # typecheck + 队列串行 + 命令保真度 + API 冒烟（28 项�
 npm run test:queue --workspace @snipdeck/drivers   # 队列必须真串行（command.txt 单车道）
 npm run test:cmd   --workspace @snipdeck/drivers   # 临时 .bat 的命令语义保真度
 npm run smoke      --workspace @snipdeck/server    # 打真路由：鉴权 / 404 / 脱敏 / 真 SSE 执行
+npm run ui:shot -- http://127.0.0.1:7878/ 390 844 data/tmp/ui.png   # 移动端仿真截图 + 布局测量
 ```
 
 ## 文档

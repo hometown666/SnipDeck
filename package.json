@@ -18,7 +18,8 @@
     "test:queue": "npm run test:queue --workspace @snipdeck/drivers",
     "test:cmd": "npm run test:cmd --workspace @snipdeck/drivers",
     "test": "npm run typecheck && npm run test:queue && npm run test:cmd && npm run smoke --workspace @snipdeck/server",
-    "sync:launchers": "node scripts/sync-launchers.mjs"
+    "sync:launchers": "node scripts/sync-launchers.mjs",
+    "ui:shot": "node scripts/ui-shot.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

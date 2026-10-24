@@ -34,8 +34,45 @@ export type RunEvent =
     }
   | { type: 'error'; stepIndex?: number; message: string }
 
+export type HealthView = {
+  ok: boolean
+  bridgeUp: boolean
+  queue: number
+  snippets: number
+  quarantined: number
+}
+
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+const TOKEN_KEY = 'sniptoken'
+
+export function getToken(): string {
+  try {
+    return localStorage.getItem(TOKEN_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function setToken(token: string): void {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token)
+    else localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    // 隐私模式下 localStorage 不可用，忽略
+  }
+}
+
 function authHeaders(): Record<string, string> {
-  const token = localStorage.getItem('sniptoken') ?? ''
+  const token = getToken()
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
@@ -44,13 +81,13 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { 'Content-Type': 'application/json', ...authHeaders(), ...(init?.headers ?? {}) },
   })
-  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
+  if (!r.ok) throw new ApiError(r.status, await r.text())
   return (await r.json()) as T
 }
 
 export const api = {
   snippets: () => req<SnippetView[]>('/api/snippets'),
-  health: () => req<{ ok: boolean; bridgeUp: boolean; queue: number; snippets: number }>('/api/health'),
+  health: () => req<HealthView>('/api/health'),
   preview: (id: string, vars: Record<string, string>) =>
     req<{ cmds: string[]; pending: string[]; missing: string[]; redacted: string[] }>(
       `/api/snippets/${encodeURIComponent(id)}/preview`,
@@ -62,7 +99,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ id, vars, confirm: confirmed }),
     }).then(async (r) => {
-      if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
+      if (!r.ok) throw new ApiError(r.status, await r.text())
       const reader = r.body!.getReader()
       const decoder = new TextDecoder()
       let buf = ''

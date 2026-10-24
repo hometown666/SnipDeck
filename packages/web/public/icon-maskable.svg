@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="SnipDeck">
+  <rect width="512" height="512" fill="#0F6E56"/>
+  <path d="M196 200 L262 256 L196 312" fill="none" stroke="#E1F5EE" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="282" y="296" width="84" height="26" rx="13" fill="#9FE1CB"/>
+</svg>

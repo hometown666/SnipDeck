@@ -388,7 +388,7 @@ remote text control/                 # 仓库根
 | ------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | **P0** 技术验证   | Monorepo 骨架；exec 驱动 spawn `ahk.bat status` 跑通；Fastify + SSE 一条 run 事件流；`scripts/start-server.ps1` + `install-autostart.ps1`（登录时计划任务、读 `.env`、日志落 `data/logs/server.log`）   | `npm test` 全绿；手机走 Tailscale 打开网页，点 `check-instence` 看到实例表；服务重启后片段索引自动重建                      |
 | **P1** 内核     | `core` 片段模型 + YAML 读写 + 索引 + 校验/quarantine；exec 驱动（双模式 + 串行队列 + 健康检查）；CLI；16 条存量迁移 | ✅ 2026-10-24 完成：`snip run` 带变量真的点中实例（notepad 回环实测）；改/删 YAML 1s 内索引变化；flag 为下拉（choices [0,1,2]）。记录见 §17 |
-| **P2** Web 界面 | 片段面板 + 变量表单 + 运行抽屉 + 输出查看 + 队列可视化 + 手机布局 + PWA                                     | 手机上不打开终端也能跑片段并看结果；队列等待时显示位置                                                    |
+| **P2** Web 界面 | 片段面板 + 变量表单 + 运行抽屉 + 输出查看 + 队列可视化 + 手机布局 + PWA                                     | ✅ 2026-10-24 完成：手机 390×844 仿真下点卡片出表单（4 字段）、点只读片段出抽屉（7 行、完成 0.1s）；队列显示「排队 N / 等待 Xs」。记录见 §18 |
 | **P3** 多目标    | `targets` 数组、并列结果、reserved 目标标注                                                    | 一条片段投 win-desktop + home-win，后者标注「未激活」                                         |
 | **P4** 打磨     | `expect` 条件步、secret 变量、danger 二次确认、bridge 预览最终命令（默认开）、从 shell 历史导入                 | 新机器上 30 分钟内导入全部历史命令并跑通一条                                                       |
 | **P5** 预留扩展   | local-pty（ConPTY 验证后）+ ssh（ssh2）；`insert`/`send` 动词；xterm.js 终端页                   | 届时定；激活一项做一项                                                                    |
@@ -535,9 +535,7 @@ remote text control/                 # 仓库根
 
 > 唯一实例约束：日志用 `cmd >>` 追加（独占句柄），重复启动第二条会报「文件被占用」。这顺带防止了两个服务抢同一个 `command.txt` 队列。
 
-## 17. P1 实施记录（2026-10-24）
-
-**迁移结果**：16 条 → 5 个分组（程序启动 3 / 状态 2 / 实例控制 5 / Shell 与服务 4 / 任务与日志 2）。`snip list` 无 quarantine，`/api/snippets` 计数 16。
+## 17. P1 实施记录（2026-10-24）**迁移结果**：16 条 → 5 个分组（程序启动 3 / 状态 2 / 实例控制 5 / Shell 与服务 4 / 任务与日志 2）。`snip list` 无 quarantine，`/api/snippets` 计数 16。
 
 **验收实测**
 
@@ -568,6 +566,34 @@ remote text control/                 # 仓库根
 
 ---
 
+## 18. P2 实施记录（2026-10-24）
+
+**这一期做了什么**
+
+| 块 | 具体 |
+|---|---|
+| 访问令牌 | 新设置弹窗（⚙）：粘贴 `SNIP_TOKEN` 存 localStorage；401 时顶部横幅引导；`ApiError` 带 status，不再把 HTML 塞进 JSON.parse |
+| 队列可视化 | health 4s 轮询（页面隐藏时暂停），顶栏显示 `排队 N`；单次 run 收到 `queued` 事件时写「队列等待 Xs」 |
+| 运行抽屉 | 自动滚到底、复制（含 `execCommand` 兜底）、`运行中 12.3s` / `完成 1.2s` / `超时`、Esc 关闭、ANSI 清掉、2000 行上限 |
+| 手机布局 | ≤640px：单列卡片、sticky 顶栏、底部抽屉 62vh、`env(safe-area-inset-bottom)`、卡片 60px 触控高度 |
+| PWA | `manifest`（icon 两套 + maskable + display_override）、`sw.js`（外壳缓存、API 不缓存）、SVG 图标、apple 三个 meta；SW 只在 `isSecureContext` 注册 |
+
+**验收实测**（CDP `Emulation.setDeviceMetricsOverride` 390×844，非窗口缩放）
+
+- 布局：`innerWidth=390`、`topbar-right.right=378`、两个图标右边缘 336 / 378、卡片宽 366 → 无横向溢出
+- 交互：点「点击实例」→ 弹窗 4 个字段（含 `*` 必填）；点「查看实例表」→ 抽屉高 256px、7 行输出、状态「完成 0.1s」
+- 资源：`manifest.webmanifest` / `sw.js` / `icon.svg` / `icon-maskable.svg` 均 200 且 MIME 正确
+
+**踩坑：无头 Chrome 的 `--window-size=390` 不是 390**
+窗口最小宽度约 500，实际 `innerWidth=478`，截图却被裁成 390 —— 看起来像「右上角按钮被挤出屏幕」。改用 CDP 仿真才看到真实值。工具已沉淀为 `npm run ui:shot -- <url> <宽> <高> <out.png>`（不依赖 Playwright）。
+
+**限制（不是缺陷）**
+
+- SW 需要安全上下文：手机走 `http://100.x:7878` 时注册会被浏览器跳过，「加到主屏」仍可用但没有离线缓存。要完整 PWA 得走 `tailscale serve` 上 HTTPS（§12 待定项 1）。
+- 队列位置目前是「长度 + 等待时长」，不是「第几位」——要精确位次得在队列里加序号，P3 多目标时一起做。
+
+---
+
 ## Changelog
 
 - **v0.1**（2026-10-24 早）：初版——三驱动（local/bridge/ssh）、node-pty + xterm.js + ssh2、WS 终端通道。
@@ -594,3 +620,7 @@ remote text control/                 # 仓库根
   - 修迁移中的三处硬伤：嵌套引号截断 + `&&` 泄漏、`exit-runlog` 文件名不符、冷壳吞首次粘贴。
   - 新增 `scripts/sync-launchers.mjs`（服务启动器，绕开路径空格）。
   - §15 补两条命令语义边界：变量原样插入、`shell` 负载必须单参数。
+- **v0.6**（2026-10-24 深夜，P2 完成）：
+  - Web 界面补齐：token 设置 + 401 引导、health 轮询与队列徽标、抽屉（自动滚动/复制/计时/超时态）、ANSI 清理、Esc 关闭、手机单列与底部抽屉、PWA（manifest + 双图标 + service worker）。
+  - 新增 `scripts/ui-shot.mjs`（`npm run ui:shot`）：CDP 移动端仿真截图 + 布局测量；记录「headless `--window-size` 最小约 500」这个坑。
+  - §18 记 P2 实施与验收；§9 P2 标完成。

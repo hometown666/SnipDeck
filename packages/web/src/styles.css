@@ -350,3 +350,108 @@ body {
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   }
 }
+
+/* ---------- P2：状态件 / 移动端 ---------- */
+
+.badge.queue {
+  color: var(--amber);
+  background: var(--amber-soft);
+  border-color: transparent;
+}
+
+.icon-btn.on {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+}
+
+.group h2 em {
+  font-style: normal;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-left: 5px;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+
+.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.drawer-id {
+  font-weight: 600;
+}
+
+.drawer-tools {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+
+.drawer-head .icon-btn {
+  margin-left: 0;
+}
+
+.drawer-body {
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 640px) {
+  .app {
+    padding: 8px 12px 150px;
+  }
+
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    background: var(--bg);
+    padding: 8px 0 10px;
+  }
+
+  .badge {
+    font-size: 11px;
+    padding: 3px 8px;
+  }
+
+  .cards {
+    grid-template-columns: 1fr;
+  }
+
+  .card {
+    min-height: 60px;
+  }
+
+  .modal {
+    border-radius: 18px 18px 0 0;
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
+  }
+
+  .drawer {
+    max-height: 62vh;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .drawer-body {
+    font-size: 12.5px;
+    padding-bottom: max(18px, env(safe-area-inset-bottom));
+  }
+}
