@@ -224,6 +224,17 @@ body {
   margin-bottom: 4px;
 }
 
+.field span .req {
+  color: var(--danger);
+  font-style: normal;
+}
+
+.form-error {
+  color: var(--danger);
+  font-size: 13px;
+  margin: 8px 0 0;
+}
+
 .field input,
 .field select {
   width: 100%;

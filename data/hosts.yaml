@@ -1,5 +1,6 @@
 win-desktop:
   driver: exec
+  default: true
   shell: cmd
   bridge: C:\ahk_trigger
   timeout: 20

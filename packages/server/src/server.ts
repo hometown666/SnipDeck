@@ -26,6 +26,15 @@ const PORT = Number(process.env.SNIPDECK_PORT ?? 8787)
 const HOST = process.env.SNIPDECK_HOST ?? '127.0.0.1'
 const TOKEN = process.env.SNIP_TOKEN ?? ''
 
+// 这是一个「任意命令执行」服务：对外监听却没有 token，等于把机器交给整个网络。
+// 与其发一条容易被忽略的警告，不如直接拒绝启动。
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
+if (!LOOPBACK_HOSTS.has(HOST) && !TOKEN) {
+  console.error(`[snipdeck] 拒绝启动：SNIPDECK_HOST=${HOST} 对外监听，但未设置 SNIP_TOKEN。`)
+  console.error('  请先设置 SNIP_TOKEN（例如 32 位随机串）再启动，否则任何能连到该地址的人都能执行命令。')
+  process.exit(1)
+}
+
 const app = Fastify({ logger: true })
 const store = new SnippetStore(SNIPPETS_DIR)
 store.watchDir()
@@ -55,7 +64,6 @@ app.get('/api/health', async () => {
     quarantined: store.errors().length,
   }
 })
-
 app.get('/api/snippets', async () => store.list().map(publicView))
 
 app.get<{ Params: { id: string } }>('/api/snippets/:id', async (req, reply) => {
@@ -101,8 +109,10 @@ app.post<{ Body: { id: string; vars?: Record<string, string>; target?: string; c
 
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
+      // 反向代理（tailscale serve / nginx）不要缓冲，否则事件会攒到最后一次性吐出
+      'X-Accel-Buffering': 'no',
     })
     const send = (ev: RunEvent) => {
       reply.raw.write(`data: ${JSON.stringify(ev)}\n\n`)
@@ -114,6 +124,7 @@ app.post<{ Body: { id: string; vars?: Record<string, string>; target?: string; c
       for await (const ev of runSnippet(snippet, driver, {
         vars,
         defaultTimeout: Number(target.timeout ?? 20),
+        defaultShell: typeof target.shell === 'string' ? target.shell : undefined,
       })) {
         send(ev)
       }
@@ -138,7 +149,14 @@ function publicView(s: Snippet) {
     vars: Object.fromEntries(
       Object.entries(s.vars ?? {}).map(([k, v]) => [
         k,
-        { prompt: v.prompt, choices: v.choices, default: v.default, secret: !!v.secret },
+        {
+          prompt: v.prompt,
+          choices: v.choices,
+          default: v.default,
+          secret: !!v.secret,
+          // 没默认值、也不能留空的变量，前端必须拦住，否则渲染出缺参数的命令照样会执行
+          required: v.default === undefined && !v.choices?.some((c) => String(c) === ''),
+        },
       ]),
     ),
   }
@@ -146,7 +164,14 @@ function publicView(s: Snippet) {
 
 if (existsSync(WEB_DIST)) {
   await app.register(fastifyStatic, { root: WEB_DIST })
-  app.setNotFoundHandler((_req, reply) => reply.sendFile('index.html'))
+  // 只让前端路由回退到 index.html；/api/* 的未知路径必须返回 JSON 404，
+  // 否则前端拿到一段 HTML 会当成成功响应去 JSON.parse。
+  app.setNotFoundHandler((req, reply) => {
+    if (req.url.startsWith('/api/')) {
+      return reply.code(404).send({ error: `no such endpoint: ${req.url}` })
+    }
+    return reply.sendFile('index.html')
+  })
 }
 
 await app.listen({ port: PORT, host: HOST })

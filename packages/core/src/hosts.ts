@@ -11,9 +11,11 @@ export function resolveTarget(
   hosts: Hosts,
   name: string | undefined,
 ): { name: string; target: HostTarget } {
+  const usable = Object.keys(hosts).filter((k) => !hosts[k]!.reserved)
   const key =
     name ??
-    Object.keys(hosts).find((k) => !hosts[k]!.reserved) ??
+    usable.find((k) => hosts[k]!.default === true) ??
+    usable[0] ??
     Object.keys(hosts)[0]
   if (!key) throw new Error('no host target configured')
   const target = hosts[key]

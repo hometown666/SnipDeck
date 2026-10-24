@@ -36,11 +36,15 @@ export function resolveVars(snippet: Snippet, provided: Record<string, string>):
   }
 
   for (const name of used) {
-    if (provided[name] !== undefined) {
-      values[name] = provided[name]
+    const spec: VarSpec | undefined = specs[name]
+    const raw = provided[name]
+
+    // 空串不等于「用户想填空」：前端表单会把未填项当 '' 发上来，
+    // 直接当有效值会让 `click {{x}} {{y}}` 渲染成缺参数的命令并静默执行。
+    if (raw !== undefined && raw !== '') {
+      values[name] = raw
       continue
     }
-    const spec: VarSpec | undefined = specs[name]
     const envName = spec?.from?.startsWith('env:') ? spec.from.slice(4) : undefined
     if (envName && process.env[envName] !== undefined) {
       values[name] = process.env[envName]!
@@ -48,6 +52,11 @@ export function resolveVars(snippet: Snippet, provided: Record<string, string>):
     }
     if (spec?.default !== undefined) {
       values[name] = String(spec.default)
+      continue
+    }
+    // 显式允许空值：choices 里带空项（如 admin 的 "" / "admin"）
+    if (raw === '' && spec?.choices?.some((c) => String(c) === '')) {
+      values[name] = ''
       continue
     }
     if (spec?.prompt) pending.push(name)

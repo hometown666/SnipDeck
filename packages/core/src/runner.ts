@@ -5,6 +5,8 @@ import type { Snippet } from './types'
 export type RunOpts = {
   vars?: Record<string, string>
   defaultTimeout?: number
+  /** 目标主机声明的默认 shell；片段自己的 shell 优先 */
+  defaultShell?: string
 }
 
 export async function* runSnippet(
@@ -23,7 +25,7 @@ export async function* runSnippet(
   }
 
   const defaultTimeout = opts.defaultTimeout ?? 20
-  const shell = snippet.shell ?? 'cmd'
+  const shell = snippet.shell ?? opts.defaultShell ?? 'cmd'
   const t0 = Date.now()
   yield { type: 'start', stepIndex: -1 }
 
@@ -37,10 +39,11 @@ export async function* runSnippet(
       continue
     }
 
-    const cmd = renderString(step.cmd, values)
     let ok = false
     let exitCode: number | undefined
+    let timedOut = false
     try {
+      const cmd = renderString(step.cmd, values)
       for await (const ev of driver.run({
         shell,
         cmd,
@@ -51,6 +54,7 @@ export async function* runSnippet(
         if (ev.type === 'exit') {
           ok = ev.ok
           exitCode = ev.exitCode
+          timedOut = !!ev.timedOut
         } else {
           yield ev
         }
@@ -61,7 +65,7 @@ export async function* runSnippet(
 
     yield { type: 'step', stepIndex: i, ok, exitCode, durationMs: Date.now() - s0 }
     if (!ok && !step.optional) {
-      yield { type: 'exit', ok: false, exitCode, durationMs: Date.now() - t0 }
+      yield { type: 'exit', ok: false, exitCode, durationMs: Date.now() - t0, timedOut }
       return
     }
   }

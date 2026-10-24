@@ -1,6 +1,6 @@
 # SnipDeck（片段坞）· 落地计划
 
-> 一句话：自托管的「片段库 + 跨设备执行」工作台。把 Terminus 的壳、你自己的纯文本片段库、以及家里那套 AHK 文件桥，缝成一个东西。
+> 一句话：自托管的「片段库 + 跨设备执行」工作台。把 Termius 的壳、你自己的纯文本片段库、以及家里那套 AHK 文件桥，缝成一个东西。
 >
 > 文档状态：v0.2 · 2026-10-24
 > 代号可改：`SnipDeck` / 中文「片段坞」。备选：`SnipDock`、`TextDeck`、`TxtCtl`。
@@ -10,9 +10,28 @@
 ## 0. v0.2 修订摘要
 
 - **架构定为方案丙**：第一期只做 **exec 驱动**（spawn `ahk.bat` / cmd / powershell，收 stdout 与退出码）；local-pty 与 ssh 降为 **P5 预留**。Driver 接口与 hosts.yaml 三目标结构不变——以防以后前端后端要融 ssh 命令行时推倒重来。
-- **触发事实**：Terminus 实况 = Command 包 16 条 snippet，其中 14 条是 `ahk.bat` 子命令包装，2 条是任意 cmd 行（一条纯 `type`，一条 `set/if` 批处理逻辑）。且 `ahk.bat` 自身就是完整的同步桥客户端（写 command.txt → 轮询 last_result → 回显 → 退出码 0/1/2），桥协议无需用 Node 重写。
+- **触发事实**：Termius 实况 = Command 包 16 条 snippet，其中 14 条是 `ahk.bat` 子命令包装，2 条是任意 cmd 行（一条纯 `type`，一条 `set/if` 批处理逻辑）。且 `ahk.bat` 自身就是完整的同步桥客户端（写 command.txt → 轮询 last_result → 回显 → 退出码 0/1/2），桥协议无需用 Node 重写。
 - **存储定为 YAML 文件**：与 SQLite / JSON / TOML 对比后确定——手改、git diff、注释、多行脚本体四项全胜（对比详见会话记录）。
 - **交互终端整体移出本期**：node-pty / xterm.js / ws 通道全部移 P5，数据通道只剩 REST + SSE。浏览器里的"终端"由「运行抽屉 + 输出查看」承担；长驻服务继续走 ahk.bat 的 shell 槽位（桌面可见窗口）。
+
+### 0.1 v0.3 审阅修订（P0 代码实测后）
+
+P0 落地代码经通读 + 实跑（typecheck、smoke 19 项、CLI 真实调桥 122ms）后，修了下列问题。前两条是「设计承诺了、代码没做到」的类型：
+
+| 问题 | 症状（实测） | 处置 |
+|---|---|---|
+| **串行队列退化成并行** | 两条各 2s 的命令并发，总耗时 2.27s；两条桥命令会同时写 command.txt | 队列改成等「上一条真正结束」才放行；新增 `npm run test:queue` 钉住这条不变式（现测 4.4s） |
+| **danger 片段在网页里永远跑不起来** | 「仍然执行」把 `confirm` 传成 `false`，服务端稳定回 400 | 确认状态与片段的 `danger` 标记解耦，独立 `confirmed` 参数 |
+| 空变量静默放行 | 表单未填的坐标当 `''` 渲染成 `click wechat#1  ` 并执行 | 空串按缺失处理（`choices` 含空项时除外）；前端标 `*` 并在提交前拦住 |
+| `/api/*` 未知路径返回 HTML | 前端拿到 HTML 却去 `JSON.parse` | SPA 回退只对非 `/api` 路径生效，其余回 404 JSON |
+| 每个 `/api/health` 都写一次 command.txt | 页面刷新就打一次桥；listener 离线时每次卡 15s | 30s TTL + in-flight 去重（实测 0.97s → 0.0016s） |
+| 对外监听可以没有 token | 绑 Tailscale 地址后，同网段任何设备都能执行任意命令 | 非 loopback 且无 `SNIP_TOKEN` → 拒绝启动并说明原因 |
+| 超时与普通失败不可区分 | 看不出是驱动杀的还是命令自己报错 | `exit` 事件带 `timedOut`，CLI / UI 显示「超时被终止」 |
+| CLI `--var k=v` 不生效 | 被解析成名为 `var x` 的变量 | `--var k=v` 与 `--k=v` 两种都认 |
+| 目标 shell 配置是死代码 | `hosts.yaml` 的 `shell` 从不生效，只有片段里的算数 | 片段 > 目标 > `cmd` 三级回退 |
+| 临时 `.bat` 只涨不降 | `data/tmp` 无清理 | 启动时清掉 7 天前的 `run-*.cmd` |
+
+**已知缺口（P2 前补）**：`runs/<runId>.jsonl` 落盘未实现（SSE 断开就看不到本次历史）；片段无 CRUD API，只能改文件；`targets[]` 多目标未做；`scripts/smoke-server.ts` 复制了一份路由实现，测的不是真服务——应把 `buildApp()` 抽出来共用，否则冒烟通过不代表线上通过。
 
 ---
 
@@ -38,7 +57,7 @@
 1. 片段库：YAML 文件为唯一真相（目录即分组），支持变量（含 `choices` 下拉）、多步动作、任意 `meta` 字段。
 2. 一类执行目标：**win-desktop（exec 驱动）**，统一到驱动接口下；local / ssh 目标在 hosts.yaml 中预留占位。
 3. 跨设备：同一份库、同一套主机配置，手机和笔记本看到的是同一个东西。
-4. CLI：`snip list|run|edit|search|reindex|hosts`，任意 SSH 终端（包括 Termius）里都能用。
+4. CLI：`snip list|run|search|hosts|status|reindex`，任意 SSH 终端（包括 Termius）里都能用。
 5. Web/PWA：片段面板 + 变量表单 + 一键运行 + 输出查看 + 桥队列可视化。
 
 **不做（本期）**
@@ -332,7 +351,7 @@ remote text control/                 # 仓库根
 ├─ packages/
 │  ├─ core/         片段模型 · 变量渲染 · 索引 · 驱动注册表 · 类型
 │  ├─ drivers/      exec.ts（local.ts / ssh.ts 为 P5 占位）
-│  ├─ cli/          snip list|run|edit|search|reindex|hosts
+│  ├─ cli/          snip list|run|search|hosts|status|reindex
 │  ├─ server/       Fastify 路由 · SSE · 静态托管
 │  └─ web/          Vite + React（PWA）
 ├─ data/
@@ -351,7 +370,7 @@ remote text control/                 # 仓库根
 
 | 期 | 内容 | 验收标准（可自己动手验） |
 |---|---|---|
-| **P0** 技术验证 | Monorepo 骨架；exec 驱动 spawn `ahk.bat status` 跑通；Fastify + SSE 一条 run 事件流；计划任务方式起服务 | 手机走 Tailscale 打开网页，点「Check Status」看到 status.txt 内容；服务重启后片段索引自动重建 |
+| **P0** 技术验证 | Monorepo 骨架；exec 驱动 spawn `ahk.bat status` 跑通；Fastify + SSE 一条 run 事件流；计划任务方式起服务 | 手机走 Tailscale 打开网页，点 `check-instence` 看到实例表；服务重启后片段索引自动重建 |
 | **P1** 内核 | `core` 片段模型 + YAML 读写 + 索引 + 校验/quarantine；exec 驱动（双模式 + 串行队列 + 健康检查）；CLI；16 条存量迁移 | `snip run click-instance` 带变量真的点中实例；手改 YAML 后索引热更新；Focus&Click 迁移后 flag 是下拉可选 |
 | **P2** Web 界面 | 片段面板 + 变量表单 + 运行抽屉 + 输出查看 + 队列可视化 + 手机布局 + PWA | 手机上不打开终端也能跑片段并看结果；队列等待时显示位置 |
 | **P3** 多目标 | `targets` 数组、并列结果、reserved 目标标注 | 一条片段投 win-desktop + home-win，后者标注「未激活」 |
@@ -437,3 +456,7 @@ remote text control/                 # 仓库根
   - bridge 驱动重定义为「spawn ahk.bat」；结构化桥动词取消，`cmd` 即命令行；新增双模式 spawn、全局串行队列、健康检查、临时 .cmd（GBK + 延时展开）。
   - 步骤动词收缩为 `run` / `sleep`（`insert`/`send` 移 P5）。
   - 路线图改 P0–P5；风险表换掉 ConPTY 行；新增 §13 附录 16 条迁移清单。
+- **v0.3**（2026-10-24 深夜）：P0 代码审阅与实测后的修订（详见 §0.1）——
+  - 修复串行队列退化成并行（核心安全不变式），并加 `test:queue` 回归测试。
+  - 修复 danger 片段无法从网页执行、空变量静默放行、`/api` 404 返回 HTML、health 每次打桥、无 token 对外监听、超时不可区分、`--var` 不生效、目标 shell 死配置、临时文件堆积。
+  - 新增 `README.md`（快速开始 / 片段写法 / 安全边界）与 `snip reindex`。

@@ -3,6 +3,7 @@ export type VarView = {
   choices?: (string | number)[]
   default?: string | number
   secret?: boolean
+  required?: boolean
 }
 
 export type SnippetView = {
@@ -19,10 +20,18 @@ export type SnippetView = {
 
 export type RunEvent =
   | { type: 'start'; stepIndex: number; cmd?: string }
+  | { type: 'queued'; stepIndex: number; waitedMs: number }
   | { type: 'stdout'; stepIndex: number; data: string }
   | { type: 'stderr'; stepIndex: number; data: string }
   | { type: 'step'; stepIndex: number; ok: boolean; exitCode?: number; durationMs?: number }
-  | { type: 'exit'; ok: boolean; exitCode?: number; durationMs?: number; stepIndex?: number }
+  | {
+      type: 'exit'
+      ok: boolean
+      exitCode?: number
+      durationMs?: number
+      stepIndex?: number
+      timedOut?: boolean
+    }
   | { type: 'error'; stepIndex?: number; message: string }
 
 function authHeaders(): Record<string, string> {
@@ -46,11 +55,11 @@ export const api = {
     req<{ cmds: string[]; pending: string[]; missing: string[] }>(
       `/api/snippets/${encodeURIComponent(id)}/preview?vars=${encodeURIComponent(JSON.stringify(vars))}`,
     ),
-  run: (id: string, vars: Record<string, string>, confirm: boolean, onEvent: (ev: RunEvent) => void) =>
+  run: (id: string, vars: Record<string, string>, confirmed: boolean, onEvent: (ev: RunEvent) => void) =>
     fetch('/api/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ id, vars, confirm }),
+      body: JSON.stringify({ id, vars, confirm: confirmed }),
     }).then(async (r) => {
       if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
       const reader = r.body!.getReader()

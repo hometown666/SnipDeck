@@ -24,9 +24,28 @@ const positional = rest.filter((a) => !a.startsWith('--') && !a.includes('='))
 
 function parseVars(args: string[]): Record<string, string> {
   const vars: Record<string, string> = {}
-  for (const a of args) {
-    const i = a.indexOf('=')
-    if (a.startsWith('--') && i > 0) vars[a.slice(2, i)] = a.slice(i + 1)
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!
+    // 两种写法都认：`--var k=v` 与 `--k=v`
+    if (a === '--var') {
+      const kv = args[i + 1]
+      const eq = kv ? kv.indexOf('=') : -1
+      if (kv && eq > 0) {
+        vars[kv.slice(0, eq)] = kv.slice(eq + 1)
+        i++
+      }
+      continue
+    }
+    if (a.startsWith('--var=')) {
+      const kv = a.slice('--var='.length)
+      const eq = kv.indexOf('=')
+      if (eq > 0) vars[kv.slice(0, eq)] = kv.slice(eq + 1)
+      continue
+    }
+    if (a.startsWith('--')) {
+      const eq = a.indexOf('=')
+      if (eq > 2) vars[a.slice(2, eq)] = a.slice(eq + 1)
+    }
   }
   return vars
 }
@@ -77,7 +96,7 @@ async function main(): Promise<void> {
     case 'run': {
       const id = positional[0]
       if (!id) {
-        console.error('usage: snip run <id> [--var k=v ...] [--yes]')
+        console.error('usage: snip run <id> [--var k=v | --k=v ...] [--yes]')
         process.exitCode = 2
         break
       }
@@ -101,10 +120,14 @@ async function main(): Promise<void> {
       for await (const ev of runSnippet(snippet, driver, {
         vars,
         defaultTimeout: Number(target.timeout ?? 20),
+        defaultShell: typeof target.shell === 'string' ? target.shell : undefined,
       })) {
         switch (ev.type) {
           case 'start':
             if (ev.cmd) console.log(`$ ${ev.cmd}`)
+            break
+          case 'queued':
+            console.log(`⏳ 排队 ${(ev.waitedMs / 1000).toFixed(1)}s`)
             break
           case 'stdout':
             process.stdout.write(ev.data.endsWith('\n') ? ev.data : ev.data + '\n')
@@ -117,7 +140,11 @@ async function main(): Promise<void> {
             break
           case 'exit':
             failed = !ev.ok
-            console.log(failed ? `✗ failed exit=${ev.exitCode ?? '-'}` : `✓ done ${ev.durationMs}ms`)
+            console.log(
+              failed
+                ? `✗ ${ev.timedOut ? '超时被终止' : `failed exit=${ev.exitCode ?? '-'}`}`
+                : `✓ done ${ev.durationMs}ms`,
+            )
             break
           case 'error':
             failed = true
@@ -126,6 +153,13 @@ async function main(): Promise<void> {
         }
       }
       if (failed) process.exitCode = 1
+      break
+    }
+
+    case 'reindex': {
+      store.reindex()
+      console.log(`reindexed: ${store.list().length} snippets, ${store.errors().length} quarantined`)
+      for (const e of store.errors()) console.error(`QUARANTINE ${e.file}: ${e.error}`)
       break
     }
 
@@ -143,7 +177,7 @@ async function main(): Promise<void> {
     }
 
     default:
-      console.log('snip list | search <q> | run <id> [--var k=v ...] [--yes] | hosts | status')
+      console.log('snip list | search <q> | run <id> [--var k=v | --k=v ...] [--yes] | hosts | status | reindex')
       console.log(`data dir: ${DATA_DIR}`)
   }
 }

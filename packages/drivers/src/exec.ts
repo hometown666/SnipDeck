@@ -1,10 +1,12 @@
+import type { Driver, RunEvent, RunRequest } from '@snipdeck/core'
 import { spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import iconv from 'iconv-lite'
-import type { Driver, RunEvent, RunRequest } from '@snipdeck/core'
 
 const CONTROL_CHARS = /[&|()%^<>\n]/
+const TMP_TTL_MS = 7 * 24 * 60 * 60 * 1000
+const HEALTH_TTL_MS = 30_000
 
 export function needsTempCmd(cmd: string): boolean {
   return CONTROL_CHARS.test(cmd)
@@ -32,16 +34,21 @@ export type ExecDriverOptions = {
   bridgeRoot: string
   tmpDir: string
   defaultTimeout?: number
+  tmpTtlMs?: number
 }
 
 export class ExecDriver implements Driver {
   readonly kind = 'exec'
-  private queue: Promise<void> = Promise.resolve()
+  /** 队列尾巴：只有上一条命令真正结束（含失败/超时）才会释放 */
+  private tail: Promise<void> = Promise.resolve()
   private queued = 0
-  private lastHealthOk = 0
+  private healthAt = 0
+  private healthOk = false
+  private healthInFlight: Promise<boolean> | null = null
 
   constructor(private opts: ExecDriverOptions) {
     mkdirSync(opts.tmpDir, { recursive: true })
+    this.sweepTmp()
   }
 
   get queueLength(): number {
@@ -49,29 +56,53 @@ export class ExecDriver implements Driver {
   }
 
   get lastHealthOkAt(): number {
-    return this.lastHealthOk
+    return this.healthOk ? this.healthAt : 0
   }
 
   run(req: RunRequest): AsyncIterable<RunEvent> {
-    if (!req.queue) return this.execOnce(req)
-    const gen = this.execOnce(req)
-    const self = this
-    return {
-      async *[Symbol.asyncIterator]() {
-        self.queued++
-        try {
-          await new Promise<void>((res) => {
-            self.queue = self.queue.then(res, res)
-          })
-          yield* gen
-        } finally {
-          self.queued--
-        }
-      },
+    return req.queue ? this.serialized(req) : this.execOnce(req)
+  }
+
+  /**
+   * 全局串行队列。command.txt 是单车道，且 ahk.bat 自身没有锁，
+   * 两条并发调用会互相覆盖，所以走桥的命令必须在这里严格 FIFO。
+   * 注意：必须把「跑完」而不是「开始跑」作为释放信号，否则队列形同虚设。
+   */
+  private async *serialized(req: RunRequest): AsyncGenerator<RunEvent> {
+    const prev = this.tail
+    let release!: () => void
+    this.tail = new Promise<void>((r) => {
+      release = r
+    })
+    const waitFrom = Date.now()
+    this.queued++
+    try {
+      await prev
+      const waitedMs = Date.now() - waitFrom
+      if (waitedMs >= 50) {
+        yield { type: 'queued', stepIndex: req.stepIndex, waitedMs }
+      }
+      yield* this.execOnce(req)
+    } finally {
+      this.queued--
+      release()
     }
   }
 
-  async health(): Promise<boolean> {
+  /** 带 TTL 与单飞（in-flight 去重）的健康检查：别让每个 /api/health 都写一次 command.txt */
+  health(force = false): Promise<boolean> {
+    if (!force && this.healthAt > 0 && Date.now() - this.healthAt < HEALTH_TTL_MS) {
+      return Promise.resolve(this.healthOk)
+    }
+    if (this.healthInFlight) return this.healthInFlight
+    const p = this.probeHealth().finally(() => {
+      this.healthInFlight = null
+    })
+    this.healthInFlight = p
+    return p
+  }
+
+  private async probeHealth(): Promise<boolean> {
     try {
       const bat = join(this.opts.bridgeRoot, 'ahk.bat')
       let ok = false
@@ -84,10 +115,31 @@ export class ExecDriver implements Driver {
       })) {
         if (ev.type === 'exit') ok = ev.ok
       }
-      if (ok) this.lastHealthOk = Date.now()
+      this.healthOk = ok
+      this.healthAt = Date.now()
       return ok
     } catch {
+      this.healthOk = false
+      this.healthAt = Date.now()
       return false
+    }
+  }
+
+  private sweepTmp(): void {
+    const ttl = this.opts.tmpTtlMs ?? TMP_TTL_MS
+    const now = Date.now()
+    try {
+      for (const name of readdirSync(this.opts.tmpDir)) {
+        if (!name.startsWith('run-')) continue
+        const p = join(this.opts.tmpDir, name)
+        try {
+          if (now - statSync(p).mtimeMs > ttl) unlinkSync(p)
+        } catch {
+          // 单个文件删不掉不影响启动
+        }
+      }
+    } catch {
+      // 目录不可读就算了
     }
   }
 
@@ -125,12 +177,21 @@ export class ExecDriver implements Driver {
     child.stdout?.on('data', (c: Buffer) => outChunks.push(c))
     child.stderr?.on('data', (c: Buffer) => errChunks.push(c))
 
-    const timer = setTimeout(() => killTree(child.pid), req.timeout * 1000)
-    const code = await new Promise<number | null>((resolve) => {
-      child.on('close', (c) => resolve(c))
-      child.on('error', () => resolve(null))
-    })
-    clearTimeout(timer)
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      killTree(child.pid)
+    }, req.timeout * 1000)
+
+    let code: number | null = null
+    try {
+      code = await new Promise<number | null>((resolve) => {
+        child.on('close', (c) => resolve(c))
+        child.on('error', () => resolve(null))
+      })
+    } finally {
+      clearTimeout(timer)
+    }
 
     const stdout = decodeOutput(Buffer.concat(outChunks))
     const stderr = decodeOutput(Buffer.concat(errChunks))
@@ -140,9 +201,10 @@ export class ExecDriver implements Driver {
     yield {
       type: 'exit',
       stepIndex: req.stepIndex,
-      ok: code === 0,
+      ok: !timedOut && code === 0,
       exitCode: code ?? undefined,
       durationMs: Date.now() - t0,
+      timedOut,
     }
   }
 }

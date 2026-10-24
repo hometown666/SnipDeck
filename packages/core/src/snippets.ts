@@ -28,12 +28,14 @@ export function validateSnippet(data: unknown): string[] {
 
 export function toSnippet(data: unknown, file: string): Snippet {
   const d = data as Record<string, unknown>
+  const shell = d.shell === 'powershell' ? 'powershell' : d.shell === 'cmd' ? 'cmd' : undefined
   return {
     id: String(d.id),
     title: d.title as string | undefined,
     group: d.group as string | undefined,
     target: d.target as string | undefined,
-    shell: (d.shell as Snippet['shell']) ?? 'cmd',
+    // 不写 shell 时不硬塞 cmd，交给目标主机的默认值兜底
+    shell,
     tags: d.tags as string[] | undefined,
     danger: d.danger as boolean | undefined,
     meta: d.meta as Record<string, unknown> | undefined,

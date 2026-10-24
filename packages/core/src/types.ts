@@ -42,6 +42,8 @@ export type HostTarget = {
   bridge?: string
   timeout?: number
   reserved?: boolean
+  /** 片段未写 target 时优先落在这台；没标则取第一个非 reserved 目标 */
+  default?: boolean
   [key: string]: unknown
 }
 
@@ -55,10 +57,19 @@ export type RunRequest = {
 
 export type RunEvent =
   | { type: 'start'; stepIndex: number; cmd?: string }
+  | { type: 'queued'; stepIndex: number; waitedMs: number }
   | { type: 'stdout'; stepIndex: number; data: string }
   | { type: 'stderr'; stepIndex: number; data: string }
   | { type: 'step'; stepIndex: number; ok: boolean; exitCode?: number; durationMs?: number }
-  | { type: 'exit'; ok: boolean; exitCode?: number; durationMs?: number; stepIndex?: number }
+  | {
+      type: 'exit'
+      ok: boolean
+      exitCode?: number
+      durationMs?: number
+      stepIndex?: number
+      /** 被驱动超时杀掉（区别于命令自己返回非 0） */
+      timedOut?: boolean
+    }
   | { type: 'error'; stepIndex?: number; message: string }
 
 export interface Driver {

@@ -3,15 +3,17 @@ import { api, type RunEvent, type SnippetView } from './api'
 
 type VarDraft = Record<string, string>
 type Output = { id: string; lines: string[]; running: boolean; ok?: boolean }
+type Draft = { snippet: SnippetView; vars: VarDraft; confirmed: boolean }
 
 export function App() {
   const [snippets, setSnippets] = useState<SnippetView[]>([])
   const [health, setHealth] = useState<{ bridgeUp: boolean; queue: number } | null>(null)
   const [q, setQ] = useState('')
-  const [draft, setDraft] = useState<{ snippet: SnippetView; vars: VarDraft } | null>(null)
+  const [draft, setDraft] = useState<Draft | null>(null)
   const [preview, setPreview] = useState<string[] | null>(null)
   const [danger, setDanger] = useState<SnippetView | null>(null)
   const [output, setOutput] = useState<Output | null>(null)
+  const [formError, setFormError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -42,8 +44,8 @@ export function App() {
     return [...map.entries()]
   }, [snippets, q])
 
-  function openSnippet(s: SnippetView) {
-    if (s.danger) {
+  function openSnippet(s: SnippetView, confirmed = false) {
+    if (s.danger && !confirmed) {
       setDanger(s)
       return
     }
@@ -54,25 +56,30 @@ export function App() {
         const v = s.vars[k]!
         vars[k] = v.default != null ? String(v.default) : ''
       }
-      setDraft({ snippet: s, vars })
+      setFormError(null)
+      setDraft({ snippet: s, vars, confirmed })
       setPreview(null)
     } else {
-      void doRun(s, {})
+      void doRun(s, {}, confirmed)
     }
   }
 
-  async function doRun(s: SnippetView, vars: VarDraft) {
+  async function doRun(s: SnippetView, vars: VarDraft, confirmed: boolean) {
     setOutput({ id: s.id, lines: [`→ ${s.id}`], running: true })
     setDraft(null)
     setDanger(null)
+    setFormError(null)
     try {
-      await api.run(s.id, vars, s.danger, (ev: RunEvent) => {
+      await api.run(s.id, vars, confirmed, (ev: RunEvent) => {
         setOutput((o) => {
           if (!o) return o
           const lines = [...o.lines]
           switch (ev.type) {
             case 'start':
               if (ev.cmd && !ev.cmd.startsWith('[')) lines.push(`$ ${ev.cmd}`)
+              break
+            case 'queued':
+              lines.push(`⏳ 队列等待 ${(ev.waitedMs / 1000).toFixed(1)}s`)
               break
             case 'stdout':
               lines.push(ev.data.replace(/\n$/, ''))
@@ -84,7 +91,13 @@ export function App() {
               lines.push(`✓ step${ev.stepIndex} exit=${ev.exitCode ?? '-'} ${ev.durationMs}ms`)
               break
             case 'exit':
-              lines.push(ev.ok ? `✓ done ${ev.durationMs}ms` : `✗ failed exit=${ev.exitCode ?? '-'}`)
+              lines.push(
+                ev.ok
+                  ? `✓ done ${ev.durationMs}ms`
+                  : ev.timedOut
+                    ? '✗ 超时被终止（命令可能仍在桌面会话里跑）'
+                    : `✗ failed exit=${ev.exitCode ?? '-'}`,
+              )
               break
             case 'error':
               lines.push(`ERROR ${ev.message}`)
@@ -101,6 +114,18 @@ export function App() {
     } catch (e) {
       setOutput((o) => (o ? { ...o, lines: [...o.lines, `ERROR ${String(e)}`], running: false, ok: false } : o))
     }
+  }
+
+  function submitDraft() {
+    if (!draft) return
+    const missing = Object.entries(draft.snippet.vars)
+      .filter(([k, v]) => v.required && !String(draft.vars[k] ?? '').trim())
+      .map(([, v]) => v.prompt ?? '未命名参数')
+    if (missing.length > 0) {
+      setFormError(`请填写：${missing.join('、')}`)
+      return
+    }
+    void doRun(draft.snippet, draft.vars, draft.confirmed)
   }
 
   async function loadPreview() {
@@ -168,7 +193,10 @@ export function App() {
             <p className="modal-sub">{draft.snippet.id}</p>
             {Object.entries(draft.snippet.vars).map(([k, v]) => (
               <label key={k} className="field">
-                <span>{v.prompt ?? k}</span>
+                <span>
+                  {v.prompt ?? k}
+                  {v.required ? <em className="req"> *</em> : null}
+                </span>
                 {v.choices ? (
                   <select value={draft.vars[k] ?? ''} onChange={(e) => setDraft({ ...draft, vars: { ...draft.vars, [k]: e.target.value } })}>
                     {v.choices.map((c) => (
@@ -188,9 +216,10 @@ export function App() {
             {preview && (
               <pre className="preview">{preview.map((c) => `$ ${c}`).join('\n')}</pre>
             )}
+            {formError && <p className="form-error">{formError}</p>}
             <div className="modal-actions">
               <button className="btn ghost" onClick={() => void loadPreview()}>预览命令</button>
-              <button className="btn primary" onClick={() => void doRun(draft.snippet, draft.vars)}>执行</button>
+              <button className="btn primary" onClick={submitDraft}>执行</button>
             </div>
           </div>
         </div>
@@ -204,7 +233,14 @@ export function App() {
             <p className="warn">该片段标记了 danger，执行后可能不可撤销。</p>
             <div className="modal-actions">
               <button className="btn ghost" onClick={() => setDanger(null)}>取消</button>
-              <button className="btn danger" onClick={() => openSnippet({ ...danger, danger: false })}>
+              <button
+                className="btn danger"
+                onClick={() => {
+                  const s = danger
+                  setDanger(null)
+                  if (s) openSnippet(s, true)
+                }}
+              >
                 仍然执行
               </button>
             </div>
