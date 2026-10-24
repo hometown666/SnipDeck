@@ -1,0 +1,31 @@
+# ============ local only: never commit ============
+# agent workspace data (memory / daily logs)
+.workbuddy/
+# SSH authorized-key usage notes, local security info, see the file itself
+SSH-USAGE.md
+# personal reference screenshots (content folded into SnipDeck-PLAN.md sec.13)
+Screenshot_*.jpg
+
+# ============ runtime data and secrets ============
+# keys / tokens, gitignored by default (PLAN 5.4)
+data/secrets.yaml
+# temp batch files run-<runId>.cmd
+data/tmp/
+# run history jsonl
+data/runs/
+
+# ============ dependencies and build ============
+node_modules/
+dist/
+*.tsbuildinfo
+
+# ============ backups and logs ============
+*.bak
+*.log
+
+# ============ editor / OS ============
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
