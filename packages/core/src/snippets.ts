@@ -67,6 +67,8 @@ export function listYamlFiles(dir: string): string[] {
 export function loadSnippets(dir: string): { snippets: Snippet[]; errors: SnippetError[] } {
   const snippets: Snippet[] = []
   const errors: SnippetError[] = []
+  // id 是唯一键：重复时后加载的会静默覆盖前一条，改成明确报错并跳过
+  const seen = new Map<string, string>()
   for (const file of listYamlFiles(dir)) {
     try {
       const data = loadYamlDoc(file).toJS()
@@ -75,7 +77,14 @@ export function loadSnippets(dir: string): { snippets: Snippet[]; errors: Snippe
         errors.push({ file, error: errs.join('; ') })
         continue
       }
-      snippets.push(toSnippet(data, file))
+      const snippet = toSnippet(data, file)
+      const prev = seen.get(snippet.id)
+      if (prev) {
+        errors.push({ file, error: `duplicate id "${snippet.id}"（已在 ${prev} 定义）` })
+        continue
+      }
+      seen.set(snippet.id, file)
+      snippets.push(snippet)
     } catch (e) {
       errors.push({ file, error: e instanceof Error ? e.message : String(e) })
     }

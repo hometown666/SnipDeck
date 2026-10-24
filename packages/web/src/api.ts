@@ -52,8 +52,9 @@ export const api = {
   snippets: () => req<SnippetView[]>('/api/snippets'),
   health: () => req<{ ok: boolean; bridgeUp: boolean; queue: number; snippets: number }>('/api/health'),
   preview: (id: string, vars: Record<string, string>) =>
-    req<{ cmds: string[]; pending: string[]; missing: string[] }>(
-      `/api/snippets/${encodeURIComponent(id)}/preview?vars=${encodeURIComponent(JSON.stringify(vars))}`,
+    req<{ cmds: string[]; pending: string[]; missing: string[]; redacted: string[] }>(
+      `/api/snippets/${encodeURIComponent(id)}/preview`,
+      { method: 'POST', body: JSON.stringify({ vars }) },
     ),
   run: (id: string, vars: Record<string, string>, confirmed: boolean, onEvent: (ev: RunEvent) => void) =>
     fetch('/api/run', {

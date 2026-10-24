@@ -16,6 +16,14 @@ export function renderString(template: string, values: Record<string, string>): 
   })
 }
 
+/**
+ * 预览专用：没解析出来的占位符原样保留（`{{x}}`），不抛错。
+ * 预览的价值是「看清楚将要执行什么」，填不全时更需要看到原始命令，而不是一个 500。
+ */
+export function renderTolerant(template: string, values: Record<string, string>): string {
+  return template.replace(VAR_RE, (m: string, name: string) => values[name] ?? m)
+}
+
 export type ResolvedVars = {
   values: Record<string, string>
   pending: string[]

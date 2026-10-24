@@ -35,6 +35,28 @@ npm run build:web                 # 构建后由 server 直接托管
 SNIPDECK_HOST=100.x.x.x SNIP_TOKEN=<32位随机串> npm run dev:server
 ```
 
+## 常驻运行
+
+```powershell
+# 一次性：注册「登录时启动」计划任务（用户会话，才能驱动桌面 GUI）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart.ps1 -Uninstall
+
+# 手动起（等价于计划任务干的事）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-server.ps1
+```
+
+配置放 `.env`（复制 `.env.example`，已 gitignore）：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `SNIPDECK_HOST` | `127.0.0.1` | 改 Tailscale IP 手机才能访问，此时必须配 token |
+| `SNIPDECK_PORT` | `8787` | 与 TxtTunnel 默认端口相同 |
+| `SNIP_TOKEN` | 空 | 非 loopback 访问的 Bearer token |
+| `SNIPDECK_DATA` / `SNIPDECK_WEB_DIST` | `data` / `packages/web/dist` | 一般不用改 |
+
+日志：`data/logs/server.log`（同一时间只允许一个实例，第二条会报「文件被占用」）。
+
 ## 写一条片段
 
 放在 `data/snippets/<分组>/<名字>.yaml`，目录就是分组：
@@ -65,7 +87,8 @@ data/
 ├─ hosts.yaml          执行目标（driver / shell / 超时）
 ├─ snippets/**/*.yaml  片段，目录即分组
 ├─ secrets.yaml        密钥（已 gitignore，可选）
-└─ tmp/                复杂命令的临时 .bat（GBK，7 天后自动清）
+├─ tmp/                复杂命令的临时 .bat（GBK，7 天后自动清）
+└─ logs/               服务日志（gitignore）
 ```
 
 ## 安全
@@ -88,9 +111,15 @@ data/
 ## 测试
 
 ```bash
-npm run typecheck
-npm run test:queue --workspace @snipdeck/drivers   # 队列串行不变式
-npm run smoke --workspace @snipdeck/server         # API 冒烟
+npm test     # typecheck + 队列串行 + 命令保真度 + API 冒烟（28 项）
+```
+
+单项：
+
+```bash
+npm run test:queue --workspace @snipdeck/drivers   # 队列必须真串行（command.txt 单车道）
+npm run test:cmd   --workspace @snipdeck/drivers   # 临时 .bat 的命令语义保真度
+npm run smoke      --workspace @snipdeck/server    # 打真路由：鉴权 / 404 / 脱敏 / 真 SSE 执行
 ```
 
 ## 文档

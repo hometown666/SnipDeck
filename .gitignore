@@ -9,6 +9,10 @@ Screenshot_*.jpg
 # ============ runtime data and secrets ============
 # keys / tokens, gitignored by default (PLAN 5.4)
 data/secrets.yaml
+# local env (SNIP_TOKEN etc.), copy .env.example to .env
+.env
+# server logs (scripts/start-server.ps1)
+data/logs/
 # temp batch files run-<runId>.cmd
 data/tmp/
 # run history jsonl

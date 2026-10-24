@@ -15,7 +15,9 @@
     "dev:web": "npm run dev --workspace @snipdeck/web",
     "build:web": "npm run build --workspace @snipdeck/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test:queue": "npm run test:queue --workspace @snipdeck/drivers"
+    "test:queue": "npm run test:queue --workspace @snipdeck/drivers",
+    "test:cmd": "npm run test:cmd --workspace @snipdeck/drivers",
+    "test": "npm run typecheck && npm run test:queue && npm run test:cmd && npm run smoke --workspace @snipdeck/server"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

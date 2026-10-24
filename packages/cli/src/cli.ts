@@ -5,7 +5,7 @@ import {
   SnippetStore,
   groupOf,
   loadHosts,
-  renderString,
+  renderTolerant,
   resolveTarget,
   resolveVars,
   runSnippet,
@@ -53,7 +53,8 @@ function parseVars(args: string[]): Record<string, string> {
 function previewCmd(snippet: ReturnType<SnippetStore['get']> & object, vars: Record<string, string>): string[] {
   if (!snippet) return []
   const { values } = resolveVars(snippet, vars)
-  return snippet.steps.filter((s) => s.do === 'run').map((s) => renderString(s.cmd, values))
+  // 预览用容错渲染：缺变量时保留 {{x}}，别让「看一眼最终命令」变成一次异常
+  return snippet.steps.filter((s) => s.do === 'run').map((s) => renderTolerant(s.cmd, values))
 }
 
 async function main(): Promise<void> {
