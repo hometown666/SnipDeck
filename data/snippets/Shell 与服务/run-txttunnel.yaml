@@ -1,0 +1,15 @@
+id: run-txttunnel
+title: 跑 TxtTunnel Gateway（往 shell 里）
+group: Shell 与服务
+target: win-desktop
+shell: cmd
+tags: [shell, service, txttunnel]
+meta:
+  source: termius-command
+  note: 路径含空格（control test），必须走 launcher，不能内联 cd
+vars:
+  n: { prompt: 壳编号, default: 1, choices: [1, 2, 3] }
+steps:
+  - do: run
+    cmd: 'call C:\ahk_trigger\ahk.bat shell shell#{{n}} C:\ahk_trigger\launchers\txttunnel.bat'
+    timeout: 25

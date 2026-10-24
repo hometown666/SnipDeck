@@ -1,0 +1,12 @@
+id: check-status
+title: 刷新桌面状态
+group: 状态
+target: win-desktop
+shell: cmd
+tags: [status]
+meta:
+  source: termius-command
+steps:
+  - do: run
+    cmd: 'call C:\ahk_trigger\ahk.bat status'
+    timeout: 25

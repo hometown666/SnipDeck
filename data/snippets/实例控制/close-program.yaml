@@ -1,0 +1,17 @@
+id: close-program
+title: 关闭实例（软关）
+group: 实例控制
+target: win-desktop
+shell: cmd
+tags: [gui, close]
+danger: true
+meta:
+  source: termius-command
+  note: 软关失败（dead=0）时改用 kill-program
+vars:
+  pro: { prompt: 程序, default: wechat }
+  n: { prompt: 实例号, default: 1 }
+steps:
+  - do: run
+    cmd: 'call C:\ahk_trigger\ahk.bat close {{pro}}#{{n}}'
+    timeout: 25

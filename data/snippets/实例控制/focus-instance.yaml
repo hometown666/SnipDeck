@@ -1,0 +1,15 @@
+id: focus-instance
+title: 激活实例
+group: 实例控制
+target: win-desktop
+shell: cmd
+tags: [gui, focus]
+meta:
+  source: termius-command
+vars:
+  pro: { prompt: 程序, default: wechat }
+  n: { prompt: 实例号, default: 1 }
+steps:
+  - do: run
+    cmd: 'call C:\ahk_trigger\ahk.bat focus {{pro}}#{{n}}'
+    timeout: 25

@@ -6,6 +6,7 @@
 ## 现在能做什么
 
 - **片段面板**：按目录分组、标签、搜索；手机加到主屏即 PWA
+- **16 条存量片段**：Termius 的 Command 包已全量迁移（启动程序 / 实例控制 / 服务 / 日志）
 - **变量表单**：`{{port}}` 占位，支持默认值、下拉选项、必填校验
 - **一键执行**：实时输出（SSE 流），结束给退出码与耗时
 - **危险动作**：`danger: true` 的片段先确认，并可预览渲染后的最终命令行
@@ -19,8 +20,9 @@
 
 ```bash
 npm install
+npm run sync:launchers            # 生成服务启动器（跑 hexo/txttunnel/backtrans 片段前需要）
 
-npm run snip -- list              # 看有哪些片段
+npm run snip -- list              # 看有哪些片段（已迁移 Termius 的 16 条）
 npm run snip -- status            # 探活：bridge up / down
 npm run snip -- run check-instence
 
@@ -79,6 +81,14 @@ steps:
 ```
 
 `do` 目前支持 `run`（无头执行）与 `sleep`（等待）。`meta:` 下可写任意键，程序原样保留。
+
+现成片段按五组放好：`程序启动` / `状态` / `实例控制` / `Shell 与服务` / `任务与日志`。
+
+### 三个容易踩的边界
+
+- **变量是原样插入**：值里的 `>`、`|`、`&` 会被驱动侧的 cmd 解释。要发这类字符，自己在片段里给变量加引号。
+- **`shell shell#N` 的负载必须是单个引号参数**：不带引号时只有第一个词送得到（`chars=7` 那种）。带空格的命令走 launcher，别内联。
+- **路径带空格就别内联 `cd`**：`shell shell#1 "cd /d D:\a b && …"` 会被 cmd 在空格处截断，`&&` 后面的命令甚至会泄漏到本地执行。用 `npm run sync:launchers` 生成的 `C:\ahk_trigger\launchers\*.bat`。
 
 ## 数据与目录
 

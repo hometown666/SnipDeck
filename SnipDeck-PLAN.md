@@ -387,7 +387,7 @@ remote text control/                 # 仓库根
 | 期             | 内容                                                                                 | 验收标准（可自己动手验）                                                                   |
 | ------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | **P0** 技术验证   | Monorepo 骨架；exec 驱动 spawn `ahk.bat status` 跑通；Fastify + SSE 一条 run 事件流；`scripts/start-server.ps1` + `install-autostart.ps1`（登录时计划任务、读 `.env`、日志落 `data/logs/server.log`）   | `npm test` 全绿；手机走 Tailscale 打开网页，点 `check-instence` 看到实例表；服务重启后片段索引自动重建                      |
-| **P1** 内核     | `core` 片段模型 + YAML 读写 + 索引 + 校验/quarantine；exec 驱动（双模式 + 串行队列 + 健康检查）；CLI；16 条存量迁移 | `snip run click-instance` 带变量真的点中实例；手改 YAML 后索引热更新；Focus\&Click 迁移后 flag 是下拉可选 |
+| **P1** 内核     | `core` 片段模型 + YAML 读写 + 索引 + 校验/quarantine；exec 驱动（双模式 + 串行队列 + 健康检查）；CLI；16 条存量迁移 | ✅ 2026-10-24 完成：`snip run` 带变量真的点中实例（notepad 回环实测）；改/删 YAML 1s 内索引变化；flag 为下拉（choices [0,1,2]）。记录见 §17 |
 | **P2** Web 界面 | 片段面板 + 变量表单 + 运行抽屉 + 输出查看 + 队列可视化 + 手机布局 + PWA                                     | 手机上不打开终端也能跑片段并看结果；队列等待时显示位置                                                    |
 | **P3** 多目标    | `targets` 数组、并列结果、reserved 目标标注                                                    | 一条片段投 win-desktop + home-win，后者标注「未激活」                                         |
 | **P4** 打磨     | `expect` 条件步、secret 变量、danger 二次确认、bridge 预览最终命令（默认开）、从 shell 历史导入                 | 新机器上 30 分钟内导入全部历史命令并跑通一条                                                       |
@@ -440,6 +440,8 @@ remote text control/                 # 仓库根
 ---
 
 ## 13. 附录：存量 snippet 迁移清单（16 条，来自 Termius Command 包）
+
+> 已全部落到 `data/snippets/`（5 个分组 16 条），实施细节与偏差见 §17。
 
 | #  | Termius 名                  | 原 script                                       | 迁移后                                                                                            |
 | -- | -------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -506,10 +508,12 @@ remote text control/                 # 仓库根
 
 **quarantine 条件**（该文件不进索引、不可运行，其余片段不受影响）：YAML 解析失败、缺 `id`、缺 `steps`、step 不合法、`id` 重复。
 
-**命令语义的两个已知边界**
+**命令语义的三个已知边界**
 
 - 落在临时 `.bat` 时 `%` 会被转义保护；`^` 仍按批处理语义处理，要字面量请写 `^^`。
 - 同一行 `set X=1 && echo %X%` 在 cmd 里是解析期展开（读不到刚设的值），交互式与批处理一致，不是驱动的 bug。
+- **变量是原样插入的**：值里的 `>` / `|` / `&` 会被**驱动侧**的 cmd 解释（实测 `--line="echo X> file"` 把输出重定向进了文件）。需要发这些字符，在片段里自己给变量加引号。
+- **`shell shell#N` 的负载必须是单个引号参数**：`... shell shell#1 mkdir C:\a\b` 只会送达 `mkdir`（`chars=7`）。带空格的命令务必写成 `"... shell shell#1 \"你要发的一整行\""`，或走 launcher。
 
 ## 16. 运行与部署
 
@@ -518,6 +522,7 @@ remote text control/                 # 仓库根
 | 启动 | `powershell -File .\scripts\start-server.ps1`（读 `.env`，日志追加到 `data/logs/server.log`） |
 | 自启 | `powershell -File .\scripts\install-autostart.ps1`（登录时计划任务）；`-Uninstall` 卸载 |
 | 配置 | 复制 `.env.example` 为 `.env`（已 gitignore） |
+| 服务启动器 | `npm run sync:launchers` —— 生成 GBK 的 `%AHK_ROOT%\launchers\{hexo,txttunnel,backtrans}.bat`；`shell` 片段依赖它 |
 | 测试 | `npm test` = typecheck + `test:queue` + `test:cmd` + smoke（28 项） |
 
 | 环境变量 | 默认 | 说明 |
@@ -529,6 +534,37 @@ remote text control/                 # 仓库根
 | `SNIPDECK_WEB_DIST` | `packages/web/dist` | 不存在则只提供 API |
 
 > 唯一实例约束：日志用 `cmd >>` 追加（独占句柄），重复启动第二条会报「文件被占用」。这顺带防止了两个服务抢同一个 `command.txt` 队列。
+
+## 17. P1 实施记录（2026-10-24）
+
+**迁移结果**：16 条 → 5 个分组（程序启动 3 / 状态 2 / 实例控制 5 / Shell 与服务 4 / 任务与日志 2）。`snip list` 无 quarantine，`/api/snippets` 计数 16。
+
+**验收实测**
+
+| 项 | 结果 |
+|---|---|
+| 带变量真的点中实例 | `notepad` 回环：`run notepad.exe` → `slot=notepad#1 hwnd=…` → `click x=320 y=180 moved=1 setPos=1` → `close dead=1` |
+| 索引热更新 | 新增 YAML 1s 内出现在 API、删除 1s 内消失（`fs.watch` + 200ms 防抖） |
+| flag 是下拉 | `cursor-refill` 的 `flag` 为 `choices: [0,1,2]`，Web 渲染成 select |
+| 桥并发不变式 | 两条 `check-status` 并发：总 1.75s，第二条 `waitedMs=569`，`durationMs` 643/1211 呈串行 |
+| PowerShell 分支 | `shell: powershell` 下中文与 `$PSVersionTable` 正常（psver=5） |
+| runlog 链路 | `run-with-log whoami` → job5 spawned → `exit-runlog job5` 读到 `0`（27ms，`queue:false` 不过桥） |
+
+**迁移中发现并修掉的问题**
+
+1. **`shell shell#N "<cmd>"` 的嵌套引号会截断参数**：cmd 在路径空格处切断（`ARG3` 只剩 `"cd /d "D:\English`）；用 `""` 转义时更糟——`&&` 后面的命令**泄漏到调用方本地执行**（实测真的跑起了 `python run.py`）。→ 三条服务片段改为调用 `C:\ahk_trigger\launchers\*.bat`（路径无空格），`cd` 收进 launcher。
+2. **8.3 短名在这块盘已关闭**（`%~s1` 原样返回长路径），没有「免引号」捷径。
+3. **`exit-runlog` 模板与实际文件名不符**：原命令是 `{{job}}.{{n}}.exit`，listener 实际写 `<id>.exit`（`JobsDir "\" jobId ".exit"`）。已去掉 `{{n}}`，job 名从 runlog 回传里抄。
+4. **冷壳会吞第一次粘贴**：`open-shell` 后 3.4s 投命令仍 `typed=1` 却不执行。`open-shell` 的 sleep 500 → 1500ms，note 里写明「再发一次」。
+5. **`shell` 负载必须是单个引号参数**：`--line="mkdir C:\a\b"` 不加引号只送达 `mkdir`（`chars=7`）。
+6. **变量值是原样插入**：值里的 `>`/`|`/`&` 由驱动侧 cmd 解释（`--line="echo X> f"` 把 ahk.bat 的输出重定向进了文件）。
+
+**仍未确认**
+
+- `cursor-refill`：原命令在截图里截断，现按 `flag==2 → admin lnk cursor续杯工具` 实现，默认 0 为 no-op，标了 danger。需要你确认 flag 语义与目标。
+- `run-backtrans` 的启动命令按该目录 README 推断为 `python run.py`。
+
+**新增脚本**：`scripts/sync-launchers.mjs`（`npm run sync:launchers`）→ 生成 GBK launcher 到 `%AHK_ROOT%\launchers`。
 
 ---
 
@@ -553,3 +589,8 @@ remote text control/                 # 仓库根
   - `windowsHide`、重复 id quarantine、reserved 目标开流前 400。
   - 补 P0 缺失的运维件：`scripts/start-server.ps1`、`scripts/install-autostart.ps1`、`.env.example`；日志改由 `cmd` 追加以免 PowerShell 把中文转成乱码。
   - 新增 §14 接口契约、§15 事件与字段参考、§16 运行与部署；§12 待定项按当前状态重写。
+- **v0.5**（2026-10-24 深夜，P1 完成）：
+  - 16 条 Termius 片段全部迁移到 `data/snippets/`（5 组）；`snip run` 带变量点中实例、热更新、flag 下拉三项验收通过（详见 §17）。
+  - 修迁移中的三处硬伤：嵌套引号截断 + `&&` 泄漏、`exit-runlog` 文件名不符、冷壳吞首次粘贴。
+  - 新增 `scripts/sync-launchers.mjs`（服务启动器，绕开路径空格）。
+  - §15 补两条命令语义边界：变量原样插入、`shell` 负载必须单参数。

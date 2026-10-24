@@ -1,0 +1,15 @@
+id: run-backtrans
+title: 跑 backtrans-coach（往 shell 里）
+group: Shell 与服务
+target: win-desktop
+shell: cmd
+tags: [shell, service, python]
+meta:
+  source: termius-command
+  note: 路径含空格（English translating），走 launcher；服务默认监听 8642
+vars:
+  n: { prompt: 壳编号, default: 1, choices: [1, 2, 3] }
+steps:
+  - do: run
+    cmd: 'call C:\ahk_trigger\ahk.bat shell shell#{{n}} C:\ahk_trigger\launchers\backtrans.bat'
+    timeout: 25

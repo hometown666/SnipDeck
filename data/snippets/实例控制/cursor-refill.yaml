@@ -1,0 +1,21 @@
+id: cursor-refill
+title: Cursor 续杯（Focus & Click）
+group: 实例控制
+target: win-desktop
+shell: cmd
+tags: [gui, cursor, admin]
+danger: true
+meta:
+  source: termius-command
+  status: 待确认
+  note: >
+    原 Termius 命令在截图里被截断，只剩 `set flag=（0,1,2）&& if %flag% equ 2 (call C:\ahk_trigg…`。
+    这里保留可确认的结构：flag==2 才执行动作，其它值为 no-op（因此默认不会误动作）。
+    待确认两点：(1) flag 取值语义；(2) 被 call 的目标是否 `admin lnk cursor续杯工具`。
+vars:
+  flag: { prompt: 模式, choices: [0, 1, 2], default: 0 }
+steps:
+  - do: run
+    cmd: 'if {{flag}} equ 2 (call C:\ahk_trigger\ahk.bat admin lnk cursor续杯工具)'
+    timeout: 30
+    optional: true

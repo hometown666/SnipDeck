@@ -1,0 +1,20 @@
+id: exit-runlog
+title: 看 runlog 的退出码
+group: 任务与日志
+target: win-desktop
+shell: cmd
+tags: [runlog, log]
+meta:
+  source: termius-command
+  note: >
+    原命令是 `type C:\ahk_trigger\jobs\{{job}}.{{n}}.exit`，但实际文件名是 `<id>.exit`
+    （没有中间那段序号，见 listener.ahk: JobsDir "\" jobId ".exit"），迁移时去掉了 {{n}}。
+    job 名从 run-with-log 的回传 `spawned ... log=...\<id>.log` 里抄。
+    纯读文件不过桥，所以 queue:false；文件不存在时 type 返回非 0，正好当「还没跑完」的信号。
+vars:
+  job: { prompt: job 名, default: job1 }
+steps:
+  - do: run
+    cmd: 'type C:\ahk_trigger\jobs\{{job}}.exit'
+    timeout: 10
+    queue: false

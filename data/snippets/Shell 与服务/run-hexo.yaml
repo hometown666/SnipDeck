@@ -1,0 +1,19 @@
+id: run-hexo
+title: 跑 hexo-pages（往 shell 里）
+group: Shell 与服务
+target: win-desktop
+shell: cmd
+tags: [shell, service, hexo]
+meta:
+  source: termius-command
+  note: >
+    原命令是 shell shell#N "cd /d D:\试炼之地\hexo-pages && hexo server"。
+    路径本身无空格其实可以直接内联，但为了三条服务片段统一、也为了躲开
+    嵌套引号（cmd 会在空格处截断参数），统一改成调用 launcher：
+    先 npm run sync:launchers 生成 C:\ahk_trigger\launchers\hexo.bat。
+vars:
+  n: { prompt: 壳编号, default: 1, choices: [1, 2, 3] }
+steps:
+  - do: run
+    cmd: 'call C:\ahk_trigger\ahk.bat shell shell#{{n}} C:\ahk_trigger\launchers\hexo.bat'
+    timeout: 25

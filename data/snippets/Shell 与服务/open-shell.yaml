@@ -1,0 +1,18 @@
+id: open-shell
+title: 开一个可见 cmd 壳
+group: Shell 与服务
+target: win-desktop
+shell: cmd
+tags: [shell, service]
+meta:
+  source: termius-command
+  note: >
+    回传里看 slot=shell#N，之后用 run-* 片段往这个壳里送命令。
+    刚开的壳需要一点时间才到提示符，冷启动时第一次粘贴会被吞（实测 3.4s 后投命令仍丢），
+    所以这里等 1.5s；如果仍是第一次失败，再发一次即可。
+steps:
+  - do: run
+    cmd: 'call C:\ahk_trigger\ahk.bat shell'
+    timeout: 25
+  - do: sleep
+    ms: 1500

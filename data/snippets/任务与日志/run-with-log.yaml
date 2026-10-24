@@ -1,0 +1,15 @@
+id: run-with-log
+title: 异步执行并留日志（runlog）
+group: 任务与日志
+target: win-desktop
+shell: cmd
+tags: [runlog]
+meta:
+  source: termius-command
+  note: 立即返回 spawned；输出在 C:\ahk_trigger\jobs\<job>.log，退出码看 exit-runlog
+vars:
+  command: { prompt: 命令, default: 'whoami' }
+steps:
+  - do: run
+    cmd: 'call C:\ahk_trigger\ahk.bat runlog {{command}}'
+    timeout: 25

@@ -1,0 +1,13 @@
+id: auto-pickup
+title: 自动拾取（提权启动）
+group: 程序启动
+target: win-desktop
+shell: cmd
+tags: [gui, launch, admin]
+danger: true
+meta:
+  source: termius-command
+steps:
+  - do: run
+    cmd: 'call C:\ahk_trigger\ahk.bat admin lnk auto_pickup'
+    timeout: 30
