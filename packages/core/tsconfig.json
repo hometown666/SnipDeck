@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@snipdeck/core": ["./src"],
+      "@snipdeck/core/*": ["./src/*"]
+    }
+  },
+  "include": ["src"]
+}

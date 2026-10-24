@@ -1,0 +1,24 @@
+{
+  "name": "snipdeck",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SnipDeck - self-hosted snippet deck with AHK bridge (exec driver)",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "snip": "npm run snip --workspace @snipdeck/cli --",
+    "dev:server": "npm run dev --workspace @snipdeck/server",
+    "dev:web": "npm run dev --workspace @snipdeck/web",
+    "build:web": "npm run build --workspace @snipdeck/web",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

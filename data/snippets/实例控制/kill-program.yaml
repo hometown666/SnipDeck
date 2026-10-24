@@ -1,0 +1,15 @@
+id: kill-program
+title: 结束程序
+group: 实例控制
+target: win-desktop
+shell: cmd
+danger: true
+tags: [gui, kill]
+vars:
+  admin: { prompt: 提权, choices: ["", "admin"], default: "" }
+  pro: { prompt: 程序, default: wechat }
+  n: { prompt: 实例号, default: 1 }
+steps:
+  - do: run
+    cmd: call C:\ahk_trigger\ahk.bat {{admin}} kill {{pro}}#{{n}}
+    timeout: 20

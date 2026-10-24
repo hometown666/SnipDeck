@@ -1,0 +1,10 @@
+id: check-instence
+title: 查看实例表
+group: 状态
+target: win-desktop
+shell: cmd
+tags: [instances, readonly]
+steps:
+  - do: run
+    cmd: call C:\ahk_trigger\ahk.bat instances
+    queue: false

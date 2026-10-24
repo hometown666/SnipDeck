@@ -1,0 +1,18 @@
+{
+  "name": "@snipdeck/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/cli.ts",
+  "exports": {
+    ".": "./src/cli.ts"
+  },
+  "dependencies": {
+    "@snipdeck/core": "*",
+    "@snipdeck/drivers": "*"
+  },
+  "scripts": {
+    "snip": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit"
+  }
+}

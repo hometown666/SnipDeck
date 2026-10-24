@@ -1,0 +1,15 @@
+id: click-instance
+title: 点击实例
+group: 实例控制
+target: win-desktop
+shell: cmd
+tags: [gui, instance]
+vars:
+  pro: { prompt: 程序, default: wechat }
+  n: { prompt: 实例号, default: 1 }
+  x: { prompt: X 坐标 }
+  y: { prompt: Y 坐标 }
+steps:
+  - do: run
+    cmd: call C:\ahk_trigger\ahk.bat click {{pro}}#{{n}} {{x}} {{y}}
+    timeout: 20

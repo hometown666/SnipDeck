@@ -1,0 +1,8 @@
+{
+  "name": "SnipDeck 片段坞",
+  "short_name": "SnipDeck",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f7f7f5",
+  "theme_color": "#0F6E56"
+}
