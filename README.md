@@ -193,6 +193,7 @@ npm run ui:queue                                   # 顶栏「排队 N」徽标�
 npm run ui:multi                                   # 多目标：目标选择器 + 并列面板（需服务在线）
 npm run ui:history                                 # 运行历史：列表 + 抽屉回放（需服务在线）
 npm run lint                                       # eslint：只拦错，不排格式
+npm run check:ps1                                  # .ps1 必须 UTF-8 with BOM 且语法可解析（PS 5.1 的坑）
 npm run clean:tmp                                  # 清 data/tmp 里 7 天前的 .cmd 与 Chrome profile
 ```
 

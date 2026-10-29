@@ -716,7 +716,7 @@ GBK 解码时 `ef bc` 先组成汉字 `锛`，剩下 `89` 成为孤字节，与�
 
 **教训（下次改 ps1 必看）**：
 
-- **改完立刻 `ParseFile` 验，别信编辑器里显示正常**——IDE 按 UTF-8 显示，PowerShell 按 CP936 读，两边看到的是两个文件。
+- **改完立刻 `ParseFile` 验，别信编辑器里显示正常**——IDE 按 UTF-8 显示，PowerShell 按 CP936 读，两边看到的是两个文件。这条现在已经自动化：`npm run check:ps1` 扫全仓 `.ps1`，缺 BOM 或语法不过就退出码 1，已串进 `npm test` 与 CI（负例验证过：临时造一个无 BOM 脚本，被抓出「缺 BOM + 字符串缺少终止符」）。
 - 这条坑对 `.bat` 同样成立但方向相反：批处理按 ANSI(GBK) 读，所以 `data/tmp/run-*.cmd` 是**有意写成 GBK** 的（§0.1、§6.4）。两种文件两套规矩，别互相套用。
 - 仓库里含中文的 Windows 脚本只有这两个，都已覆盖；`.bat/.cmd` 不在仓库里（launchers 生成在 `%AHK_ROOT%`，运行时临时文件在 `data/tmp`）。
 

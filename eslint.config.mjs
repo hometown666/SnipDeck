@@ -68,8 +68,10 @@ export default [
       'no-undef': 'off',
       // 边界处（fastify 泛型、CDP 返回值、探针脚本）有意的 any，不值得为它加一堆泛型
       '@typescript-eslint/no-explicit-any': 'off',
-      // 下划线前缀 = 有意不用（回调签名占位）
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      // 下划线前缀 = 有意不用（回调签名占位）。
+      // 用 error 不用 warn：历史上有过「算出来没人用」的死变量（history.ts 的 shell），
+      // warn 不会让 CI 变红，等于没拦。
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'no-empty': ['error', { allowEmptyCatch: true }],
     },
   },

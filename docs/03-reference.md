@@ -105,8 +105,8 @@
 | 服务启动器 | `npm run sync:launchers` —— 生成 GBK 的 `%AHK_ROOT%\launchers\{hexo,txttunnel,backtrans}.bat`；`shell` 片段依赖它 |
 | Lint | `npm run lint`（eslint 9 flat config，`eslint.config.mjs`）。**只拦错不排格式**——没有 prettier，免得一次把 5000 行重排成没法 review 的 diff |
 | 清临时产物 | `npm run clean:tmp` —— 删 `data/tmp` 下 7 天前的 `run-*.cmd` 与 `*-profile`（CDP 的 Chrome profile，每个十几 MB）；`--dry` 只看，`--days N` 改期限，`--all` 忽略年龄全删 profile。UI 脚本启动时也会各自判断 profile 超过 1 天没用就重建（`scripts/lib/profile.mjs`） |
-| CI | `.github/workflows/ci.yml`（windows-latest）：`npm ci` → typecheck → lint → queue / cmd / search / expect / import。**smoke 与三个 `ui:*` 故意不进 CI**，它们要 listener.ahk / Chrome / 在线服务 |
-| 测试 | `npm test` = typecheck + `test:queue` + `test:cmd` + `test:search`(14) + `test:expect`(40) + `test:import`(60) + smoke（66 项）。冒烟 fixture 落系统 temp（`mkdtemp`），跑完自动删；**清理失败只 warn，不改退出码**——本机注入的 safe-delete shim 曾让全绿的测试红掉（ISSUE-004）。静态壳免 token 的 5 条用例在 `packages/web/dist` 不存在时整组跳过并打 `~`（先 `npm run build:web`）。多目标的 5 条校验 + 4 条实跑用例用**不打桥**的 `ping -n 3` 片段，listener 离线也跑（串行断言靠事件区间不重叠 + 总耗时 ≥ 3.5s）。运行档案的 12 条用例在临时数据目录里真跑两次 run 再读盘（含 secret 不落盘、`reason` 归类、列表不含存储用的 `kind`）。`expect` 的文件源另测 4 种编码（UTF-16 LE/BE 有无 BOM、GBK）与 CRLF 锚点，正则执行有 500ms 预算（回溯炸弹会被截断而不是拖死服务）。搜索语义 `npm run test:search`；多目标 UI `npm run ui:multi`；历史回放 UI `npm run ui:history`（后两个需服务在线，不进 `npm test`） |
+| CI | `.github/workflows/ci.yml`（windows-latest）：`npm ci` → typecheck → lint → check:ps1 → queue / cmd / search / expect / import。**smoke 与三个 `ui:*` 故意不进 CI**，它们要 listener.ahk / Chrome / 在线服务 |
+| 测试 | `npm test` = typecheck + lint + `check:ps1` + `test:queue` + `test:cmd` + `test:search`(14) + `test:expect`(40) + `test:import`(60) + smoke（66 项）。`check:ps1` 扫全仓 `.ps1` 验 UTF-8 BOM 与语法（ISSUE-017 的防回归，见 §0.9）。冒烟 fixture 落系统 temp（`mkdtemp`），跑完自动删；**清理失败只 warn，不改退出码**——本机注入的 safe-delete shim 曾让全绿的测试红掉（ISSUE-004）。静态壳免 token 的 5 条用例在 `packages/web/dist` 不存在时整组跳过并打 `~`（先 `npm run build:web`）。多目标的 5 条校验 + 4 条实跑用例用**不打桥**的 `ping -n 3` 片段，listener 离线也跑（串行断言靠事件区间不重叠 + 总耗时 ≥ 3.5s）。运行档案的 12 条用例在临时数据目录里真跑两次 run 再读盘（含 secret 不落盘、`reason` 归类、列表不含存储用的 `kind`）。`expect` 的文件源另测 4 种编码（UTF-16 LE/BE 有无 BOM、GBK）与 CRLF 锚点，正则执行有 500ms 预算（回溯炸弹会被截断而不是拖死服务）。搜索语义 `npm run test:search`；多目标 UI `npm run ui:multi`；历史回放 UI `npm run ui:history`（后两个需服务在线，不进 `npm test`） |
 
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
@@ -122,3 +122,40 @@
 > `[System.Management.Automation.Language.Parser]::ParseFile()` 验一遍，别只看编辑器里显示正常。
 >
 > **日志轮转**：`start-server.ps1` 启动前若 `server.log` 超过 5MB，改名成 `server.log.1`（只留一份）。轮转只能在启动前做——运行中日志句柄被 `cmd >>` 独占，改名必失败（脚本里已经 catch 掉，不阻塞启动）。
+
+### 16.1 自启：待办（2026-10-30 状态 —— 脚本已修好，**计划任务未注册**）
+
+`scripts/install-autostart.ps1` 注册的计划任务名是 **`SnipDeck-server`**：
+
+| 项 | 值 |
+|---|---|
+| 触发器 | 用户登录（`-AtLogOn -User $env:USERNAME`）。必须跑在交互桌面会话里，否则 listener.ahk 看不见桌面，GUI 片段全废 |
+| 动作 | `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "<repo>\scripts\start-server.ps1"` |
+| 工作目录 | 仓库根。**路径含空格（`remote text control`），`-File` 后面的引号不能省** |
+| 设置 | 电池上照跑、错过就补、失败 1 分钟重试 ×3、无执行时限 |
+| 权限 | 普通权限即可，只注册当前账户 |
+
+**为什么还没装**：这脚本到 2026-10-30 才第一次能跑（缺 BOM 导致它从来没法执行，见 §0.9 ISSUE-017）。注册会立刻拉起服务并改系统状态，等你点头。
+
+**装之前先确认两件事**：
+
+1. **`.env` 里的 `SNIP_TOKEN` 填了没有** —— 空的话服务只监听 `127.0.0.1`，手机连不上（非 loopback 且无 token 时服务直接拒绝启动，§11）。
+2. **当前有没有手工起的实例** —— 脚本末尾会立刻 `Start-ScheduledTask`；日志句柄独占，第二个实例会自己退出。这是设计（顺带防止两个服务抢 `command.txt`），但看起来像「装失败」。
+
+```powershell
+# 装（会立刻启动任务）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart.ps1
+
+# 卸
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart.ps1 -Uninstall
+```
+
+**验收**：
+
+| 检查 | 期望 |
+|---|---|
+| `Get-ScheduledTask -TaskName 'SnipDeck-server'` | State = `Ready` 或 `Running` |
+| 注销重登后**不手动起服务** | `curl --noproxy '*' http://127.0.0.1:7878/api/health` 直接返回 `ok:true` |
+| `data/logs/server.log` | 有一条新的启动记录 |
+
+**已知限制**：只管「登录后启动」，没登录不跑 —— 刻意的。真要「开机即跑」得配凭据跑 Session 0，那时 GUI 驱动就没意义了。

@@ -120,3 +120,9 @@
   - **`App.tsx` 1096 → 570 行**：抽出 `types.ts`、`lib/run-events.ts`（事件→面板的纯函数层，不含 React）、`components/` 下 8 个展示组件（Topbar / Sidebar / SnippetList / RunFormModal / RunDrawer / HistoryModal / SettingsModal / DangerModal）。分层约定：判定与状态在 App，长相在 components，事件语义在 lib。
   - 回归：`npm test` 退出码 0（search 14 / expect 40 / import 60 / smoke 66）、`ui:multi` 49 项、`ui:queue`、`ui:history` 全过——拆分对行为零影响。
 
+- **v1.9**（2026-10-30，把两个问题钉死 + 自启待办入档 · 无行为改动）：
+  - **自启写进计划**：新增 §16.1，记清 `SnipDeck-server` 的任务定义（AtLogOn / `-File "…"` 引号不能省 / 电池与重试设置）、「为什么还没装」、**装前必须确认的两件事**（`.env` 的 `SNIP_TOKEN`；有没有手工实例在跑）、验收三条、以及「只管登录后」这个限制。总览加「待办」表做唯一入口。
+  - **ISSUE-017 防回归**：新增 `npm run check:ps1`（`scripts/check-ps1.ps1`）——扫全仓 `.ps1`，同时验 **UTF-8 BOM** 与 **`Parser::ParseFile` 语法**，已串进 `npm test`（typecheck → lint → check:ps1）并加进 CI 一步。负例验证过：一个无 BOM 的临时脚本被抓出「缺 BOM + 行 2 字符串缺少终止符」，退出码 1。
+  - **死代码防回归**：`@typescript-eslint/no-unused-vars` 从 `warn` 升 `error` —— 之前 `history.ts` 里那个算出来没人用的 `shell` 能活着一整期，就是因为 warn 不会让 CI 变红。负例验证：临时写一个未使用变量，eslint 退非 0。
+  - 顺手修 `check-ps1.ps1` 在 npm/CI 管道下的中文乱码（PowerShell 5.1 重定向时按 ANSI 写 stdout，改成 `[Console]::IsOutputRedirected` 时切 UTF-8，直接开窗口跑不受影响）。
+

@@ -34,6 +34,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: PowerShell 脚本（UTF-8 BOM + 语法）
+        # PS 5.1 无 BOM 时按 CP936 读 .ps1，中文注释会让引号配对错位、脚本一行都不执行
+        # （ISSUE-017）。这条门禁就是不让它再靠人眼发现。
+        run: npm run check:ps1
+
       - name: 队列必须真串行
         run: npm run test:queue
 
