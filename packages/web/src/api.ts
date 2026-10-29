@@ -23,7 +23,14 @@ export type RunEvent =
   | { type: 'queued'; stepIndex: number; waitedMs: number }
   | { type: 'stdout'; stepIndex: number; data: string }
   | { type: 'stderr'; stepIndex: number; data: string }
-  | { type: 'step'; stepIndex: number; ok: boolean; exitCode?: number; durationMs?: number }
+  | {
+      type: 'step'
+      stepIndex: number
+      ok: boolean
+      exitCode?: number
+      durationMs?: number
+      note?: string
+    }
   | {
       type: 'exit'
       ok: boolean
@@ -31,6 +38,7 @@ export type RunEvent =
       durationMs?: number
       stepIndex?: number
       timedOut?: boolean
+      note?: string
     }
   | { type: 'error'; stepIndex?: number; message: string }
 

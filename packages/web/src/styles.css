@@ -10,6 +10,8 @@
   --danger-soft: #fcebeb;
   --amber: #854f0b;
   --amber-soft: #faeeda;
+  --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, "Sarasa Mono SC",
+    "Noto Sans Mono CJK SC", "Microsoft YaHei", monospace;
 }
 
 * {
@@ -46,7 +48,7 @@ body {
 }
 
 .logo {
-  font-family: ui-monospace, Consolas, monospace;
+  font-family: var(--mono);
   color: var(--accent);
   font-weight: 600;
 }
@@ -69,6 +71,7 @@ body {
   border: 1px solid var(--border);
   color: var(--text-2);
   background: var(--surface);
+  white-space: nowrap;
 }
 
 .badge.up {
@@ -83,6 +86,12 @@ body {
   border-color: transparent;
 }
 
+.badge.queue {
+  color: var(--amber);
+  background: var(--amber-soft);
+  border-color: transparent;
+}
+
 .icon-btn {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -94,7 +103,19 @@ body {
   color: var(--text-2);
 }
 
-.searchbar input {
+.icon-btn:hover {
+  color: var(--text);
+  border-color: #d6d5cd;
+}
+
+.icon-btn.on {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
+}
+
+.searchbar input,
+.sidebar-search input {
   width: 100%;
   padding: 11px 14px;
   border-radius: 12px;
@@ -104,8 +125,13 @@ body {
   outline: none;
 }
 
-.searchbar input:focus {
+.searchbar input:focus,
+.sidebar-search input:focus {
   border-color: var(--accent);
+}
+
+.sidebar {
+  display: none;
 }
 
 .groups {
@@ -119,9 +145,17 @@ body {
   margin: 18px 0 8px;
 }
 
+.group h2 em {
+  font-style: normal;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-left: 5px;
+}
+
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
 }
 
@@ -132,16 +166,20 @@ body {
   align-items: flex-start;
   text-align: left;
   padding: 13px 14px;
-  min-height: 74px;
+  min-height: 60px;
   border-radius: 14px;
   border: 1px solid var(--border);
   background: var(--surface);
   cursor: pointer;
-  transition: transform 0.06s ease;
+  transition: transform 0.06s ease, border-color 0.12s ease;
 }
 
 .card:active {
   transform: scale(0.97);
+}
+
+.card.active {
+  border-color: var(--accent);
 }
 
 .card-title {
@@ -167,6 +205,30 @@ body {
   color: var(--text-2);
   text-align: center;
   padding: 40px 0;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+
+.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .modal-mask {
@@ -248,19 +310,27 @@ body {
 .preview {
   background: #26251f;
   color: #e8e7df;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
   padding: 12px;
   border-radius: 10px;
-  white-space: pre-wrap;
-  word-break: break-all;
+  white-space: pre;
+  overflow: auto;
 }
 
 .modal-actions {
   display: flex;
   gap: 10px;
   justify-content: flex-end;
+  align-items: center;
   margin-top: 16px;
+}
+
+.modal-hint {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--text-2);
 }
 
 .btn {
@@ -289,6 +359,8 @@ body {
   background: transparent;
 }
 
+/* ---------------- 运行抽屉 ---------------- */
+
 .drawer {
   position: fixed;
   left: 0;
@@ -297,15 +369,13 @@ body {
   background: var(--surface);
   border-top: 2px solid var(--border);
   z-index: 15;
-  max-height: 52vh;
+  max-height: 62vh;
+  border-radius: 14px 14px 0 0;
   display: flex;
   flex-direction: column;
 }
 
-.drawer.running {
-  border-top-color: var(--accent);
-}
-
+.drawer.running,
 .drawer.ok {
   border-top-color: var(--accent);
 }
@@ -320,98 +390,105 @@ body {
   gap: 10px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
-  font-weight: 600;
   font-size: 14px;
-}
-
-.drawer-status {
-  font-weight: 400;
-  font-size: 12px;
-  color: var(--text-2);
-}
-
-.drawer-head .icon-btn {
-  margin-left: auto;
-}
-
-.drawer-body {
-  margin: 0;
-  padding: 12px 14px 20px;
-  overflow: auto;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12.5px;
-  white-space: pre-wrap;
-  word-break: break-all;
-  color: var(--text);
-}
-
-@media (min-width: 640px) {
-  .cards {
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  }
-}
-
-/* ---------- P2：状态件 / 移动端 ---------- */
-
-.badge.queue {
-  color: var(--amber);
-  background: var(--amber-soft);
-  border-color: transparent;
-}
-
-.icon-btn.on {
-  color: var(--accent);
-  border-color: var(--accent-soft);
-}
-
-.group h2 em {
-  font-style: normal;
-  font-weight: 400;
-  font-size: 12px;
-  color: var(--text-2);
-  margin-left: 5px;
-}
-
-.banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  background: var(--amber-soft);
-  color: var(--amber);
-  border-radius: 10px;
-  padding: 10px 12px;
-  margin: 10px 0 0;
-  font-size: 13px;
-}
-
-.link {
-  border: 0;
-  background: none;
-  padding: 0;
-  font: inherit;
-  color: inherit;
-  text-decoration: underline;
-  cursor: pointer;
-  white-space: nowrap;
 }
 
 .drawer-id {
   font-weight: 600;
+  font-family: var(--mono);
+}
+
+.drawer-status {
+  font-size: 12.5px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.drawer-status.run {
+  color: var(--accent);
+}
+
+.drawer-status.ok {
+  color: var(--accent);
+}
+
+.drawer-status.fail {
+  color: var(--danger);
 }
 
 .drawer-tools {
   margin-left: auto;
   display: flex;
-  gap: 2px;
-}
-
-.drawer-head .icon-btn {
-  margin-left: 0;
+  gap: 4px;
 }
 
 .drawer-body {
+  margin: 0;
+  padding: 12px 14px max(18px, env(safe-area-inset-bottom));
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text);
+  /* 默认不折行：宁可横向滚动，也不把一行劈成两截（管道表靠空格对齐） */
+  white-space: pre;
+  tab-size: 2;
   -webkit-overflow-scrolling: touch;
+}
+
+/* 「自动换行」开关：断点优先落在分隔符之后，而不是任意字符处 */
+.drawer.wrap .drawer-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.line {
+  display: block;
+  min-height: 1.55em;
+}
+
+.line-mark {
+  user-select: none;
+}
+
+.line-meta {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.line-cmd {
+  font-weight: 600;
+}
+
+.line-cmd .line-mark {
+  color: var(--text-2);
+  font-weight: 400;
+}
+
+.line-step.ok {
+  color: var(--accent);
+}
+
+.line-step.bad {
+  color: var(--danger);
+}
+
+.line-queue {
+  color: var(--amber);
+}
+
+.line-err {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* ---------------- 平板 ---------------- */
+
+@media (min-width: 641px) {
+  .cards {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  }
 }
 
 @media (max-width: 640px) {
@@ -432,26 +509,184 @@ body {
     padding: 3px 8px;
   }
 
-  .cards {
-    grid-template-columns: 1fr;
-  }
-
-  .card {
-    min-height: 60px;
-  }
-
   .modal {
     border-radius: 18px 18px 0 0;
     padding-bottom: max(24px, env(safe-area-inset-bottom));
   }
 
+  .modal-hint {
+    display: none;
+  }
+}
+
+/* ---------------- 桌面（P2.5） ---------------- */
+
+@media (min-width: 1024px) {
+  .app {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .topbar {
+    height: 52px;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 8;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: sticky;
+    top: 52px;
+    height: calc(100vh - 52px);
+    padding: 16px 14px;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    overflow: auto;
+  }
+
+  .sidebar-search input {
+    font-size: 14px;
+    padding: 9px 12px;
+  }
+
+  .nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .nav-item:hover {
+    background: var(--bg);
+    border-color: var(--border);
+  }
+
+  .nav-item em {
+    font-style: normal;
+    font-size: 12px;
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .nav-hint {
+    margin: auto 0 0;
+    font-size: 11.5px;
+    line-height: 1.7;
+    color: var(--text-2);
+  }
+
+  .content {
+    max-width: 1280px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 24px 28px 96px;
+  }
+
+  /* 桌面的搜索框在左栏，顶栏下不再占一条纵向空间 */
+  .searchbar {
+    display: none;
+  }
+
+  .groups {
+    margin-top: 0;
+  }
+
+  .group h2 {
+    font-size: 12.5px;
+    letter-spacing: 0.02em;
+    margin: 22px 0 10px;
+  }
+
+  .group:first-child h2 {
+    margin-top: 0;
+  }
+
+  .cards {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+  }
+
+  .card {
+    height: 64px;
+    min-height: 64px;
+    justify-content: center;
+    gap: 3px;
+    padding: 10px 14px;
+  }
+
+  .card:hover {
+    border-color: var(--accent);
+  }
+
+  .card-title,
+  .card-meta {
+    display: block;
+    width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .modal-mask {
+    align-items: center;
+  }
+
+  .modal {
+    border-radius: 16px;
+    padding: 22px 22px 20px;
+  }
+
+  /* 抽屉：右侧全高面板，覆盖主区而不挤压 */
   .drawer {
-    max-height: 62vh;
-    border-radius: 14px 14px 0 0;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    left: auto;
+    width: min(720px, 62vw);
+    max-height: none;
+    border-radius: 0;
+    border-top: 0;
+    border-left: 2px solid var(--border);
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.08);
+  }
+
+  .drawer-head {
+    height: 48px;
+    padding: 0 16px;
+    gap: 12px;
   }
 
   .drawer-body {
-    font-size: 12.5px;
-    padding-bottom: max(18px, env(safe-area-inset-bottom));
+    padding: 16px 20px;
+    font-size: 13.5px;
+    line-height: 1.55;
   }
 }

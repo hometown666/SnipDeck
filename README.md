@@ -1,6 +1,6 @@
 # SnipDeck（片段坞）
 
-自托管的「片段库 + 跨设备执行」工作台：手机上点一下，家里的 Windows 就执行一条命令，输出实时回来看。
+自托管的「片段库 + 跨设备执行」工作台：手机上点一下，家里的 Windows 就执行一条命令，输出实时回来看。  
 片段就是 YAML 文件——能 `git diff`、能手改、能整包拷走，不锁在任何云里。
 
 ## 现在能做什么
@@ -50,23 +50,38 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-server.ps1
 
 配置放 `.env`（复制 `.env.example`，已 gitignore）：
 
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| `SNIPDECK_HOST` | `127.0.0.1` | 改 Tailscale IP 手机才能访问，此时必须配 token |
-| `SNIPDECK_PORT` | `7878` | 避开 TxtTunnel 的 8787 |
-| `SNIP_TOKEN` | 空 | 非 loopback 访问的 Bearer token |
-| `SNIPDECK_DATA` / `SNIPDECK_WEB_DIST` | `data` / `packages/web/dist` | 一般不用改 |
+| 变量                                    | 默认                           | 说明                                |
+| ------------------------------------- | ---------------------------- | --------------------------------- |
+| `SNIPDECK_HOST`                       | `127.0.0.1`                  | 改 Tailscale IP 手机才能访问，此时必须配 token |
+| `SNIPDECK_PORT`                       | `7878`                       | 避开 TxtTunnel 的 8787               |
+| `SNIP_TOKEN`                          | 空                            | 非 loopback 访问 `/api/*` 的 Bearer token（静态页免）       |
+| `SNIPDECK_DATA` / `SNIPDECK_WEB_DIST` | `data` / `packages/web/dist` | 一般不用改                             |
 
 日志：`data/logs/server.log`（同一时间只允许一个实例，第二条会报「文件被占用」）。
+
+## 桌面端
+
+宽屏（≥1024px）换一套布局：左侧 260px 分组栏 + 居中主区，卡片固定 64px、标题单行省略；运行输出改成**右侧全高面板**，默认不折行（管道表、长路径保持原样），右上角 `↩` 可切自动换行。
+
+| 快捷键 | 作用 |
+|---|---|
+| `/` | 聚焦搜索 |
+| `↑` `↓` | 在搜索结果里移动，卡片描边高亮 |
+| `Enter` | 执行选中的片段 |
+| `Ctrl/⌘ + Enter` | 变量表单里直接执行 |
+| `Esc` | 逐层关闭：设置 → 表单/确认 → 运行面板 |
+
+> 输出按语义上色：命令回显、步骤结果（✓ 绿 / ✗ 红）、队列等待（琥珀）、错误（红底）。
+> 桥用 `ERR|` 前缀报错但退出码是 0 时，这里也会判成失败——不会把「slot not found」显示成「完成」。
 
 ## 手机 / PWA
 
 1. 服务端监听 Tailscale 地址并设 token；
-2. 手机浏览器打开 `http://100.x.x.x:7878`；
-3. 第一次会弹横幅要 token —— 点右上角 ⚙ 粘贴一次，存在这台设备的 localStorage；
+2. 手机浏览器打开 `http://100.x.x.x:7878`——**首屏和静态资源免 token**，页面能正常打开；
+3. 打开后顶部会弹「这台设备还没有 token」横幅：点右上角 ⚙ 粘贴一次，存在这台设备的 localStorage。**token 只护 `/api/*`**，所以页面本身不设防，防的是数据与执行；
 4. 「添加到主屏幕」即可当应用用。
 
-> **关于离线**：service worker 只在安全上下文注册。经 `http://100.x` 访问时浏览器会跳过，
+> **关于离线**：service worker 只在安全上下文注册。经 `http://100.x` 访问时浏览器会跳过，  
 > 此时是「快捷方式」而不是完整 PWA；要离线缓存与安装提示，需要 `tailscale serve` 上 HTTPS。
 
 ## 写一条片段
@@ -115,32 +130,35 @@ data/
 
 - **网络边界靠 Tailscale**，不要做公网端口映射
 - 对外监听必须设 `SNIP_TOKEN`，否则服务拒绝启动——这是「任意命令执行」的服务
+- token 只护 `/api/*`：静态壳（页面/JS/CSS/图标）免 token，否则手机拿不到页面也就没地方填 token。放行静态页的暴露面只有「一个空壳 UI」，数据与执行仍在 token 之后
 - 密钥只写 `from: env:XXX` 或 `data/secrets.yaml`，不要内联进片段
 - `kill` / `admin:` 类片段请标 `danger: true`
 
 ## 结构
 
-| 包 | 作用 |
-|---|---|
-| `packages/core` | 片段模型、YAML 读写、变量渲染、索引、运行编排 |
-| `packages/drivers` | `exec` 驱动（cmd / powershell + 全局串行队列） |
-| `packages/server` | Fastify：REST + SSE + 静态托管 |
-| `packages/cli` | `snip list / run / search / hosts / status / reindex` |
-| `packages/web` | Vite + React + PWA |
+| 包                  | 作用                                                    |
+| ------------------ | ----------------------------------------------------- |
+| `packages/core`    | 片段模型、YAML 读写、变量渲染、索引、运行编排                             |
+| `packages/drivers` | `exec` 驱动（cmd / powershell + 全局串行队列）                  |
+| `packages/server`  | Fastify：REST + SSE + 静态托管                             |
+| `packages/cli`     | `snip list / run / search / hosts / status / reindex` |
+| `packages/web`     | Vite + React + PWA                                    |
 
 ## 测试
 
 ```bash
-npm test     # typecheck + 队列串行 + 命令保真度 + API 冒烟（28 项）
+npm test     # typecheck + 队列串行 + 命令保真度 + 搜索语义 + API 冒烟（33 项）
 ```
 
 单项：
 
 ```bash
-npm run test:queue --workspace @snipdeck/drivers   # 队列必须真串行（command.txt 单车道）
-npm run test:cmd   --workspace @snipdeck/drivers   # 临时 .bat 的命令语义保真度
-npm run smoke      --workspace @snipdeck/server    # 打真路由：鉴权 / 404 / 脱敏 / 真 SSE 执行
+npm run test:queue  --workspace @snipdeck/drivers  # 队列必须真串行（command.txt 单车道）
+npm run test:cmd    --workspace @snipdeck/drivers  # 临时 .bat 的命令语义保真度
+npm run test:search --workspace @snipdeck/core     # 中文子串 / 多词 AND / 大小写与空白（14 项）
+npm run smoke       --workspace @snipdeck/server   # 打真路由：鉴权 / 404 / 脱敏 / 真 SSE 执行
 npm run ui:shot -- http://127.0.0.1:7878/ 390 844 data/tmp/ui.png   # 移动端仿真截图 + 布局测量
+npm run ui:queue                                   # 顶栏「排队 N」徽标可见性（需服务 + 桥都在线）
 ```
 
 ## 文档
