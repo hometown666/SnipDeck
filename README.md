@@ -196,4 +196,12 @@ npm run ui:history                                 # 运行历史：列表 + 抽
 
 ## 文档
 
-- [SnipDeck-PLAN.md](./SnipDeck-PLAN.md) — 架构、驱动能力边界、路线图与验收
+计划已拆成 7 份，**章节编号全局不变**（写「§14」就是 `docs/03-reference.md` 第 14 节）：
+
+- [SnipDeck-PLAN.md](./SnipDeck-PLAN.md) — 总览：文档地图、修订摘要、进度快照
+- [docs/01-design.md](./docs/01-design.md) — 架构、驱动能力边界、数据模型、运行时（§1–§8）
+- [docs/02-roadmap.md](./docs/02-roadmap.md) — 路线图与验收、风险、安全模型、待定项（§9–§12）
+- [docs/03-reference.md](./docs/03-reference.md) — 迁移清单、接口契约、字段参考、部署（§13–§16）
+- [docs/04-phases.md](./docs/04-phases.md) — 各期实施记录与取舍（§17–§22）
+- [docs/00-issues.md](./docs/00-issues.md) — ISSUE-001~016 现场记录与修复（§0.2–§0.8）
+- [docs/05-changelog.md](./docs/05-changelog.md) — 变更日志
