@@ -3,7 +3,7 @@
 .workbuddy/
 # SSH authorized-key usage notes, local security info, see the file itself
 SSH-USAGE.md
-# personal reference screenshots (content folded into SnipDeck-PLAN.md sec.13)
+# personal reference screenshots (content folded into docs/03-reference.md §13)
 Screenshot_*.jpg
 
 # ============ runtime data and secrets ============

@@ -354,12 +354,17 @@ remote text control/                 # 仓库根
 │  ├─ cli/          snip list|run|search|hosts|status|reindex
 │  ├─ server/       Fastify 路由 · SSE · 静态托管
 │  └─ web/          Vite + React（PWA）
+│     ├─ App.tsx        状态编排（570 行；2026-10-30 从 1096 行拆出）
+│     ├─ types.ts       Pane / Output / Draft / MAX_TARGETS
+│     ├─ lib/run-events.ts  事件 → 面板的纯函数（可单测）
+│     └─ components/    Topbar · Sidebar · SnippetList · RunFormModal ·
+│                       RunDrawer · HistoryModal · SettingsModal · DangerModal
 ├─ data/
 │  ├─ hosts.yaml
 │  ├─ snippets/
 │  ├─ tmp/
 │  └─ runs/
-├─ scripts/         自启安装 / 启动脚本 / 冒烟测试
+├─ scripts/         自启安装 / 启动脚本 / 冒烟测试 / UI 回归 / clean-tmp
 ├─ docs/            计划分卷（2026-10-30 从单文件拆出，章节号不变）
 │  ├─ 00-issues.md      issue 队列 · 现场记录 · 修复计划（§0.2–§0.8）
 │  ├─ 01-design.md      本文件：设计与架构（§1–§8）
@@ -367,8 +372,14 @@ remote text control/                 # 仓库根
 │  ├─ 03-reference.md   迁移清单 · 接口契约 · 字段参考 · 部署（§13–§16）
 │  ├─ 04-phases.md      分期实施记录（§17–§22）
 │  └─ 05-changelog.md   变更日志
+├─ .github/workflows/ci.yml   CI：typecheck + lint + 不依赖桥的单测
+├─ .gitattributes   # 全库 LF；.bat/.cmd 强制 CRLF
+├─ .editorconfig    # .ps1 必须 utf-8-bom（理由见 §16）
+├─ eslint.config.mjs
 ├─ SnipDeck-PLAN.md # 总览 · 文档地图 · 修订摘要（§0 / §0.1）
 └─ README.md        # 快速开始 / 片段写法 / 安全边界（面向使用者）
 ```
 
 > 拆分规则：**章节号全局唯一且不变**。任何地方写「§14」就是指 `docs/03-reference.md` 的第 14 节，不需要记文件名——总览的文档地图负责换算。
+>
+> 前端分层的分工：**判定与状态在 `App.tsx`，长相在 `components/`，事件怎么变成面板在 `lib/run-events.ts`**。后者是纯函数层，改文案/加事件类型都不该动组件。

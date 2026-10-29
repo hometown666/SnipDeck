@@ -1,4 +1,4 @@
-# 注册 / 卸载 SnipDeck 服务为「登录时启动」计划任务
+﻿# 注册 / 卸载 SnipDeck 服务为「登录时启动」计划任务
 #
 # 用法（普通权限即可，不需要管理员）：
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart.ps1

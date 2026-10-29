@@ -103,6 +103,9 @@
 | 自启 | `powershell -File .\scripts\install-autostart.ps1`（登录时计划任务）；`-Uninstall` 卸载 |
 | 配置 | 复制 `.env.example` 为 `.env`（已 gitignore） |
 | 服务启动器 | `npm run sync:launchers` —— 生成 GBK 的 `%AHK_ROOT%\launchers\{hexo,txttunnel,backtrans}.bat`；`shell` 片段依赖它 |
+| Lint | `npm run lint`（eslint 9 flat config，`eslint.config.mjs`）。**只拦错不排格式**——没有 prettier，免得一次把 5000 行重排成没法 review 的 diff |
+| 清临时产物 | `npm run clean:tmp` —— 删 `data/tmp` 下 7 天前的 `run-*.cmd` 与 `*-profile`（CDP 的 Chrome profile，每个十几 MB）；`--dry` 只看，`--days N` 改期限，`--all` 忽略年龄全删 profile。UI 脚本启动时也会各自判断 profile 超过 1 天没用就重建（`scripts/lib/profile.mjs`） |
+| CI | `.github/workflows/ci.yml`（windows-latest）：`npm ci` → typecheck → lint → queue / cmd / search / expect / import。**smoke 与三个 `ui:*` 故意不进 CI**，它们要 listener.ahk / Chrome / 在线服务 |
 | 测试 | `npm test` = typecheck + `test:queue` + `test:cmd` + `test:search`(14) + `test:expect`(40) + `test:import`(60) + smoke（66 项）。冒烟 fixture 落系统 temp（`mkdtemp`），跑完自动删；**清理失败只 warn，不改退出码**——本机注入的 safe-delete shim 曾让全绿的测试红掉（ISSUE-004）。静态壳免 token 的 5 条用例在 `packages/web/dist` 不存在时整组跳过并打 `~`（先 `npm run build:web`）。多目标的 5 条校验 + 4 条实跑用例用**不打桥**的 `ping -n 3` 片段，listener 离线也跑（串行断言靠事件区间不重叠 + 总耗时 ≥ 3.5s）。运行档案的 12 条用例在临时数据目录里真跑两次 run 再读盘（含 secret 不落盘、`reason` 归类、列表不含存储用的 `kind`）。`expect` 的文件源另测 4 种编码（UTF-16 LE/BE 有无 BOM、GBK）与 CRLF 锚点，正则执行有 500ms 预算（回溯炸弹会被截断而不是拖死服务）。搜索语义 `npm run test:search`；多目标 UI `npm run ui:multi`；历史回放 UI `npm run ui:history`（后两个需服务在线，不进 `npm test`） |
 
 | 环境变量 | 默认 | 说明 |
@@ -114,3 +117,8 @@
 | `SNIPDECK_WEB_DIST` | `packages/web/dist` | 不存在则只提供 API |
 
 > 唯一实例约束：日志用 `cmd >>` 追加（独占句柄），重复启动第二条会报「文件被占用」。这顺带防止了两个服务抢同一个 `command.txt` 队列。
+>
+> **`.ps1` 必须是 UTF-8 with BOM**（2026-10-30 踩到）。PowerShell 5.1 只在看到 BOM 时才按 UTF-8 解码，否则按 CP936 读——中文注释里的三字节字符（`→`、`——`、`「」`）会造成字节错位，把后面的引号配对搞乱，**脚本直接语法失败**。`install-autostart.ps1` 原来就因此跑不起来（`ParseFile` 报「字符串缺少终止符」），已补 BOM。`check .editorconfig` 里 `[*.ps1] charset = utf-8-bom` 就是这个原因。改完请用
+> `[System.Management.Automation.Language.Parser]::ParseFile()` 验一遍，别只看编辑器里显示正常。
+>
+> **日志轮转**：`start-server.ps1` 启动前若 `server.log` 超过 5MB，改名成 `server.log.1`（只留一份）。轮转只能在启动前做——运行中日志句柄被 `cmd >>` 独占，改名必失败（脚本里已经 catch 掉，不阻塞启动）。

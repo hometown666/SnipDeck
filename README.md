@@ -192,6 +192,8 @@ npm run ui:shot -- http://127.0.0.1:7878/ 390 844 data/tmp/ui.png   # 移动端�
 npm run ui:queue                                   # 顶栏「排队 N」徽标可见性（需服务 + 桥都在线）
 npm run ui:multi                                   # 多目标：目标选择器 + 并列面板（需服务在线）
 npm run ui:history                                 # 运行历史：列表 + 抽屉回放（需服务在线）
+npm run lint                                       # eslint：只拦错，不排格式
+npm run clean:tmp                                  # 清 data/tmp 里 7 天前的 .cmd 与 Chrome profile
 ```
 
 ## 文档

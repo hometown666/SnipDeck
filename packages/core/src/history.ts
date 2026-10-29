@@ -235,7 +235,6 @@ export type ImportResult = {
 /** 只做规划，不写盘。CLI 先打印它，用户确认后再 `writePlan` */
 export function planImport(opts: ImportOptions): ImportResult {
   const group = opts.group ?? '历史导入'
-  const shell = opts.shell ?? 'powershell'
   const limit = opts.limit ?? 100
   const { kept, dropped } = normalizeHistory(opts.lines)
   // 历史文件是「旧 → 新」，取尾部最近的 limit 条更有价值

@@ -1,0 +1,23 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.md]
+# markdown 的行尾双空格是硬换行，别裁
+trim_trailing_whitespace = false
+
+[*.ps1]
+# PowerShell 5.1 只有看到 BOM 才认 UTF-8；没有 BOM 时会按 CP936 解码，
+# 中文注释里的三字节字符会把后面的引号配对搞错 —— 实测能让脚本直接语法失败
+# （install-autostart.ps1 就踩过，2026-10-30 修）。
+charset = utf-8-bom
+
+[*.{bat,cmd}]
+# cmd.exe 对 LF 的多行块（if (...)）会报语法错
+end_of_line = crlf

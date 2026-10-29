@@ -1,0 +1,50 @@
+# CI：只跑「不依赖本机环境」的那部分。
+#
+# 为什么是 windows-latest：这个项目的执行层就是 Windows（cmd / GBK 落盘 /
+# 临时 .bat / ping 语义），跑在 ubuntu 上等于测了个别的项目。
+#
+# 故意不进 CI 的：
+#   · smoke      —— 会真跑 `check-instance` 之类走 ahk 桥的片段，需要 listener.ahk 常驻
+#   · ui:multi / ui:queue / ui:history —— 需要本机 Chrome + 在线服务 + 桥
+# 这两类留在本地手动跑，判据写在 docs/03-reference.md §16。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: 队列必须真串行
+        run: npm run test:queue
+
+      - name: 命令语义保真度
+        run: npm run test:cmd
+
+      - name: 搜索（CJK 子串 + 多词 AND）
+        run: npm run test:search
+
+      - name: expect（三源 / 编码 / 正则预算）
+        run: npm run test:expect
+
+      - name: 历史导入（清洗 / 残句 / 危险标记）
+        run: npm run test:import

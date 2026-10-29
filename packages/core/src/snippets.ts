@@ -33,7 +33,6 @@ function stepError(v: unknown, i: number): string | null {
       if (src.kind === 'invalid') return `steps[${i}] ${src.error}`
       try {
         // 用 flags 一并编译，才能抓出 `(?<` 之类只在带 flag 时非法的情况
-        // eslint-disable-next-line no-new
         new RegExp(s.match, typeof s.flags === 'string' ? s.flags : undefined)
       } catch (e) {
         return `steps[${i}] expect.match 正则无效: ${e instanceof Error ? e.message : String(e)}`

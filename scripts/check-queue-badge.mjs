@@ -20,7 +20,7 @@
  */
 import { spawn, execSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { profileDir } from './lib/profile.mjs'
 
 const CANDIDATES = [
   process.env.CHROME_PATH,
@@ -50,7 +50,7 @@ const chrome = spawn(
     '--no-first-run',
     '--incognito',
     `--remote-debugging-port=${port}`,
-    `--user-data-dir=${resolve(process.cwd(), 'data/tmp/ui-queue-profile')}`,
+    `--user-data-dir=${profileDir('ui-queue-profile')}`,
     'about:blank',
   ],
   { stdio: 'ignore' },

@@ -1,0 +1,18 @@
+# 行尾统一（2026-10-30）
+#
+# 本机 core.autocrlf=true，没有本文件时 git 会在检出时把工作区写成 CRLF，
+# 而仓库里存的、编辑器里改的都是 LF —— 结果就是每次动一个 markdown
+# 都变成「整文件改动」。这里把规则写死：仓库与工作区一律 LF。
+* text=auto eol=lf
+
+# Windows 批处理必须 CRLF：cmd.exe 对 LF 的多行块（if (...) 之类）会报语法错。
+# 仓库里目前没有 .bat/.cmd（launchers 生成在 %AHK_ROOT%，不进仓库），留着防以后加。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制，别做行尾转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.woff2 binary

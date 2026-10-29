@@ -108,3 +108,15 @@
   - 切分方式：按行号 `sed` 搬运 + 逐段 `diff` 校验。`00-issues` / `02-roadmap` / `03-reference` / `04-phases` / `05-changelog` 与原文件**逐字一致**；`01-design.md` 只改了 §8 的仓库结构树（补 `docs/` 六个分卷、补 `README.md`）并加一句拆分规则。正文零删改。
   - README「文档」节改成七条分卷链接；§8 树与新目录同步。
 
+- **v1.8**（2026-10-30，工程债清理 + 前端拆分 · **行为不变**）：
+  - **`.gitattributes` 落地**：全库 `eol=lf`。本机 `core.autocrlf=true` 且此前没有这个文件 = 检出时会把工作区写成 CRLF，之后动一个 markdown 都是整文件 diff。`.bat/.cmd` 例外，强制 CRLF（cmd 对 LF 的多行块会报语法错）。
+  - **修好一个没人发现的坏脚本**：`install-autostart.ps1` 是 UTF-8 **无 BOM**，PS 5.1 按 CP936 解码后，中文注释里的三字节字符让引号配对错位，`Parser::ParseFile` 直接报「字符串缺少终止符」——**它根本跑不起来**，所以自启从没被真正装过。两个 `.ps1` 都补了 BOM，`.editorconfig` 用 `charset = utf-8-bom` 锁住。
+  - **版本号对齐**：6 个 `package.json` 从 `0.1.0` 改成 `1.7.0`（此前与 Changelog 差 17 个小版本）。
+  - **`npm run clean:tmp`**：清 `data/tmp` 下 7 天前的 `run-*.cmd` 与 `*-profile`（CDP 用的 Chrome profile）。四个 UI 脚本改走 `scripts/lib/profile.mjs`，自家 profile 超过 1 天没用就重建。首清释放 **59MB**（6 个目录），`data/tmp` 67MB → 4.1MB。
+  - **日志轮转**：`start-server.ps1` 启动前若 `server.log` > 5MB，改名为 `server.log.1`（只留一份；运行中句柄独占改不动，失败只提示不阻塞）。
+  - **`.env` 补齐**：值 = 当前实际运行值（`127.0.0.1:7878`），`SNIP_TOKEN` 留空并注释说明。此前只有 `.env.example`，自启路径从未配过。
+  - **eslint 9 + typescript-eslint 接入**（`eslint.config.mjs`，`npm run lint`，已串进 `npm test` 的 typecheck 之后）。首跑 14 个 error 全是对规则的误用面（`sw.js` 的 serviceworker 全局、ANSI 正则里的控制字符），配 globals 与单行 disable 后归零；**顺手清掉两处死代码**——`planImport` 里算出来没人用的 `shell`、`test-import.mts` 里没用的 `mkdirSync`。
+  - **CI**（`.github/workflows/ci.yml`，windows-latest）：`npm ci` → typecheck → lint → queue / cmd / search / expect / import。smoke 与三个 `ui:*` 要 listener.ahk / Chrome / 在线服务，**不进 CI**。
+  - **`App.tsx` 1096 → 570 行**：抽出 `types.ts`、`lib/run-events.ts`（事件→面板的纯函数层，不含 React）、`components/` 下 8 个展示组件（Topbar / Sidebar / SnippetList / RunFormModal / RunDrawer / HistoryModal / SettingsModal / DangerModal）。分层约定：判定与状态在 App，长相在 components，事件语义在 lib。
+  - 回归：`npm test` 退出码 0（search 14 / expect 40 / import 60 / smoke 66）、`ui:multi` 49 项、`ui:queue`、`ui:history` 全过——拆分对行为零影响。
+

@@ -1,4 +1,4 @@
-# SnipDeck 服务启动脚本（手动 / 计划任务都走这里）
+﻿# SnipDeck 服务启动脚本（手动 / 计划任务都走这里）
 #
 # 为什么要跑在「登录时的用户会话」而不是 Session 0：
 # exec 驱动最终由桌面上的 listener.ahk 执行 GUI 动作，服务必须看得见那个桌面。
@@ -27,6 +27,18 @@ if (-not $env:SNIPDECK_PORT) { $env:SNIPDECK_PORT = '7878' }
 $logDir = Join-Path $root 'data\logs'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $log = Join-Path $logDir 'server.log'
+
+# 启动前轮转：单文件超 5MB 就挪成 server.log.1，只留一份。
+# 只在这里轮转是够的——服务靠 `cmd >>` 独占句柄追加，运行中动它会失败；
+# 而启动前这一刻要么没有实例，要么旧实例还占着句柄（那就跳过，下次再说）。
+if ((Test-Path $log) -and ((Get-Item $log).Length -gt 5MB)) {
+  try {
+    Move-Item -Force $log (Join-Path $logDir 'server.log.1')
+    Write-Host "[snipdeck] 日志已轮转：server.log → server.log.1"
+  } catch {
+    Write-Host "[snipdeck] 日志轮转失败（可能另一实例正占用），继续启动"
+  }
+}
 
 Write-Host "[snipdeck] $($env:SNIPDECK_HOST):$($env:SNIPDECK_PORT)  log -> $log"
 
