@@ -17,10 +17,17 @@ export function snippetHaystack(s: Snippet, dir: string): string {
     s.title ?? '',
     groupOf(s, dir),
     (s.tags ?? []).join(' '),
-    s.steps.map((st) => (st.do === 'run' ? st.cmd : '')).join('\n'),
+    s.steps.map(stepText).join('\n'),
   ]
     .join('\n')
     .toLowerCase()
+}
+
+/** 可搜文本：run 的命令正文 + expect 的正则（「等 runlog」这类片段靠它被搜到） */
+function stepText(st: Snippet['steps'][number]): string {
+  if (st.do === 'run') return st.cmd
+  if (st.do === 'expect') return st.match
+  return ''
 }
 
 /**
@@ -31,10 +38,7 @@ export function scoreSnippet(s: Snippet, terms: string[]): number {
   const title = (s.title ?? '').toLowerCase()
   const id = s.id.toLowerCase()
   const tags = (s.tags ?? []).join(' ').toLowerCase()
-  const body = s.steps
-    .map((st) => (st.do === 'run' ? st.cmd : ''))
-    .join('\n')
-    .toLowerCase()
+  const body = s.steps.map(stepText).join('\n').toLowerCase()
   let score = 0
   for (const t of terms) {
     if (title.includes(t)) score += 3

@@ -17,11 +17,15 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test:queue": "npm run test:queue --workspace @snipdeck/drivers",
     "test:cmd": "npm run test:cmd --workspace @snipdeck/drivers",
-    "test": "npm run typecheck && npm run test:queue && npm run test:cmd && npm run test:search && npm run smoke --workspace @snipdeck/server",
+    "test": "npm run typecheck && npm run test:queue && npm run test:cmd && npm run test:search && npm run test:expect && npm run test:import && npm run smoke --workspace @snipdeck/server",
     "sync:launchers": "node scripts/sync-launchers.mjs",
     "ui:shot": "node scripts/ui-shot.mjs",
     "test:search": "npm run test:search --workspace @snipdeck/core",
-    "ui:queue": "node scripts/check-queue-badge.mjs"
+    "ui:queue": "node scripts/check-queue-badge.mjs",
+    "ui:multi": "node scripts/check-multi-target.mjs",
+    "test:expect": "npm run test:expect --workspace @snipdeck/core",
+    "test:import": "npm run test:import --workspace @snipdeck/core",
+    "ui:history": "node scripts/check-history.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

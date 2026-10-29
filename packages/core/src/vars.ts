@@ -40,6 +40,9 @@ export function resolveVars(snippet: Snippet, provided: Record<string, string>):
   for (const step of snippet.steps) {
     if (step.do === 'run') {
       for (const n of collectVarNames(step.cmd)) used.add(n)
+    } else if (step.do === 'expect' && step.from) {
+      // `from: file:{{logPath}}` 也要参与变量校验，否则运行时才炸
+      for (const n of collectVarNames(step.from)) used.add(n)
     }
   }
 

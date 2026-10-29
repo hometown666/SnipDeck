@@ -13,6 +13,13 @@
 - **单车道队列**：`command.txt` 只能一条一条来，走桥的命令严格 FIFO，前端会显示排队时长
 - **CLI**：任意 SSH 终端（Termius、手机、iPad）里 `snip run <id>`
 - **执行目标**：`win-desktop`（exec 驱动，经 `ahk.bat` 驱动桌面 GUI）
+- **多目标执行**：卡片右上角 `⊕` 打开目标选择器；**同一个目标可以重复添加**——只有一台可执行机器时，这就是「同目标多开」，结果在抽屉里并列成 N 块面板，事件按目标分流
+- **`expect` 条件步**：片段里除了「跑」和「等」还能断言文本：`match` 正则 + `from`（上一步输出 / 全部输出 / 轮询一个文件）。等日志里出现 `Hexo is running at` 不再是 sleep 猜时长
+- **运行档案**：每次执行服务端落一份 `data/runs/<runId>.jsonl`（谁、在哪台、变量、逐条事件、结论）；顶栏 `🕘` 可以回看任意一次，关掉页面 / 网络断了都不丢
+- **从 shell 历史导入**：`snip import-history` 把 PSReadLine 历史里用过的命令一键变片段（默认 dry-run，危险命令自动标 `danger`）
+
+> 多目标目前只有 `win-desktop` 一个可选项（`home-win` / `vps` 灰显，P5 预留）。
+> 真正的「一条片段投多台机器」要等 P5 的 ssh 驱动；数据结构和 UI 已经按 `targets[]` 铺好了。
 
 ## 快速开始
 
@@ -25,6 +32,10 @@ npm run sync:launchers            # 生成服务启动器（跑 hexo/txttunnel/b
 npm run snip -- list              # 看有哪些片段（已迁移 Termius 的 16 条）
 npm run snip -- status            # 探活：bridge up / down
 npm run snip -- run check-instence
+
+npm run snip -- import-history    # 历史命令 → 片段（默认只看计划，加 --write 才落盘）
+npm run snip -- import-history --limit 30 --write
+npm run snip -- runs              # 本机最近的运行档案（带 runId 可看详情）
 
 npm run dev:server                # http://127.0.0.1:7878
 npm run dev:web                   # http://127.0.0.1:5173（/api 代理到 7878）
@@ -74,6 +85,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-server.ps1
 > 输出按语义上色：命令回显、步骤结果（✓ 绿 / ✗ 红）、队列等待（琥珀）、错误（红底）。
 > 桥用 `ERR|` 前缀报错但退出码是 0 时，这里也会判成失败——不会把「slot not found」显示成「完成」。
 
+多目标时抽屉加宽到 `min(1320px, calc(100vw - 48px))`，内部按目标数并列（顶部标 `win-desktop #1 / #2`）；
+手机上自动改成上下堆叠。执行仍然是**一条一条来**（`command.txt` 单车道），并列的是结果不是时间。
+
+顶栏 `🕘` 是运行历史：点一条就在抽屉里回放那次执行的命令与输出，头部标 `🕘 历史时间`。
+回放只读（不会重跑），secret 变量的值在档案里已经抹成 `***`。
+
 ## 手机 / PWA
 
 1. 服务端监听 Tailscale 地址并设 token；
@@ -105,7 +122,18 @@ steps:
   - { do: sleep, ms: 300 }
 ```
 
-`do` 目前支持 `run`（无头执行）与 `sleep`（等待）。`meta:` 下可写任意键，程序原样保留。
+`do` 支持 `run`（无头执行）、`sleep`（等待）、`expect`（正则断言）：
+
+```yaml
+steps:
+  - { do: run, cmd: 'type D:\blog\hexo.log' }
+  - { do: expect, match: 'Hexo is running at', from: 'file:D:\blog\hexo.log', timeout: 20 }
+  - { do: expect, match: 'ERROR', from: last, optional: true }   # optional: 不匹配也继续
+```
+
+`expect.from` 三选一：`last`（缺省，最近一条有输出的 `run`）、`all`（本次 run 全部输出）、`file:<路径>`（**真的等**：每 200ms 重读，到 `timeout` 秒还不匹配就判失败）。`flags` 只认 `i` / `m` / `s`。
+
+`meta:` 下可写任意键，程序原样保留。
 
 现成片段按五组放好：`程序启动` / `状态` / `实例控制` / `Shell 与服务` / `任务与日志`。
 
@@ -123,6 +151,7 @@ data/
 ├─ snippets/**/*.yaml  片段，目录即分组
 ├─ secrets.yaml        密钥（已 gitignore，可选）
 ├─ tmp/                复杂命令的临时 .bat（GBK，7 天后自动清）
+├─ runs/               运行档案（jsonl，启动时留最近 500 份 / 30 天）
 └─ logs/               服务日志（gitignore）
 ```
 
@@ -141,13 +170,13 @@ data/
 | `packages/core`    | 片段模型、YAML 读写、变量渲染、索引、运行编排                             |
 | `packages/drivers` | `exec` 驱动（cmd / powershell + 全局串行队列）                  |
 | `packages/server`  | Fastify：REST + SSE + 静态托管                             |
-| `packages/cli`     | `snip list / run / search / hosts / status / reindex` |
+| `packages/cli`     | `snip list / search / run / hosts / status / reindex / runs / import-history` |
 | `packages/web`     | Vite + React + PWA                                    |
 
 ## 测试
 
 ```bash
-npm test     # typecheck + 队列串行 + 命令保真度 + 搜索语义 + API 冒烟（33 项）
+npm test     # typecheck + 队列串行 + 命令保真度 + 搜索语义 + expect + 历史导入 + API 冒烟（59 项）
 ```
 
 单项：
@@ -156,9 +185,13 @@ npm test     # typecheck + 队列串行 + 命令保真度 + 搜索语义 + API �
 npm run test:queue  --workspace @snipdeck/drivers  # 队列必须真串行（command.txt 单车道）
 npm run test:cmd    --workspace @snipdeck/drivers  # 临时 .bat 的命令语义保真度
 npm run test:search --workspace @snipdeck/core     # 中文子串 / 多词 AND / 大小写与空白（14 项）
+npm run test:expect --workspace @snipdeck/core     # expect 三源 / 正则 flags / 轮询等待（28 项）
+npm run test:import --workspace @snipdeck/core     # 历史清洗 / 残句识别 / 危险标记 / 不覆盖（41 项）
 npm run smoke       --workspace @snipdeck/server   # 打真路由：鉴权 / 404 / 脱敏 / 真 SSE 执行
 npm run ui:shot -- http://127.0.0.1:7878/ 390 844 data/tmp/ui.png   # 移动端仿真截图 + 布局测量
 npm run ui:queue                                   # 顶栏「排队 N」徽标可见性（需服务 + 桥都在线）
+npm run ui:multi                                   # 多目标：目标选择器 + 并列面板（需服务在线）
+npm run ui:history                                 # 运行历史：列表 + 抽屉回放（需服务在线）
 ```
 
 ## 文档

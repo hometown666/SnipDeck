@@ -13,6 +13,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test:search": "tsx scripts/test-search.mts"
+    "test:search": "tsx scripts/test-search.mts",
+    "test:expect": "tsx scripts/test-expect.mts",
+    "test:import": "tsx scripts/test-import.mts"
   }
 }

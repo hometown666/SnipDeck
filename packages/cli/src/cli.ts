@@ -1,14 +1,19 @@
 #!/usr/bin/env node
-import { resolve } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  RunLog,
   SnippetStore,
   groupOf,
   loadHosts,
+  parseHistorySource,
+  planImport,
   renderTolerant,
   resolveTarget,
   resolveVars,
   runSnippet,
+  writePlan,
 } from '@snipdeck/core'
 import { createDriver, ExecDriver } from '@snipdeck/drivers'
 
@@ -17,10 +22,21 @@ const DATA_DIR = resolve(REPO_ROOT, process.env.SNIPDECK_DATA ?? 'data')
 const SNIPPETS_DIR = resolve(DATA_DIR, 'snippets')
 const HOSTS_FILE = resolve(DATA_DIR, 'hosts.yaml')
 const TMP_DIR = resolve(DATA_DIR, 'tmp')
+const RUNS_DIR = resolve(DATA_DIR, 'runs')
 
 const [cmd = 'help', ...rest] = process.argv.slice(2)
 const flag = (name: string) => rest.includes(`--${name}`)
 const positional = rest.filter((a) => !a.startsWith('--') && !a.includes('='))
+
+/** `--name=value` 与 `--name value` 两种写法都认 */
+function opt(name: string): string | undefined {
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i]!
+    if (a === `--${name}`) return rest[i + 1]
+    if (a.startsWith(`--${name}=`)) return a.slice(name.length + 3)
+  }
+  return undefined
+}
 
 function parseVars(args: string[]): Record<string, string> {
   const vars: Record<string, string> = {}
@@ -138,7 +154,11 @@ async function main(): Promise<void> {
             break
           case 'step':
             console.log(
-              `${ev.ok ? '✓' : '✗'} step${ev.stepIndex} exit=${ev.exitCode ?? '-'} ${ev.durationMs}ms${ev.note ? ' · ERR' : ''}`,
+              `${ev.ok ? '✓' : '✗'} step${ev.stepIndex}${
+                ev.expect !== undefined
+                  ? ` match /${ev.expect}/${ev.matched ? ` → ${ev.matched}` : ev.note ? ` · ${ev.note}` : ''}`
+                  : ` exit=${ev.exitCode ?? '-'}${ev.note ? ' · ERR' : ''}`
+              } ${ev.durationMs}ms`,
             )
             break
           case 'exit':
@@ -156,6 +176,108 @@ async function main(): Promise<void> {
         }
       }
       if (failed) process.exitCode = 1
+      break
+    }
+
+    case 'import-history': {
+      const src = parseHistorySource(opt('from'))
+      if (!existsSync(src.path)) {
+        console.error(`历史文件不存在: ${src.path}`)
+        process.exitCode = 2
+        break
+      }
+      const group = opt('group') ?? '历史导入'
+      const shell = opt('shell') === 'cmd' ? 'cmd' : 'powershell'
+      const limit = Number(opt('limit') ?? 100) || 100
+      const opts = {
+        lines: readFileSync(src.path, 'utf8').split(/\r?\n/),
+        snippetsDir: SNIPPETS_DIR,
+        group,
+        shell,
+        limit,
+        force: flag('force'),
+        source: `${src.kind} · ${src.path}`,
+      } as const
+      const plan = planImport(opts)
+      const fresh = plan.planned.filter((p) => p.state === 'new')
+      console.log(`来源 ${src.path}`)
+      console.log(
+        `原始 ${plan.total} 行 → 丢弃 ${plan.dropped} 行（空行/去重/时间戳/噪声命令）→ 候选 ${plan.planned.length} 条，其中 ${fresh.length} 条可写`,
+      )
+      for (const p of plan.planned.slice(0, 20)) {
+        console.log(`  ${p.state === 'skip' ? '~' : '+'}${p.danger ? '!' : ' '} ${p.id}  ${p.cmd.slice(0, 64)}`)
+      }
+      if (plan.planned.length > 20) console.log(`  … 还有 ${plan.planned.length - 20} 条`)
+      if (!flag('write')) {
+        console.log(`\n未写入（默认 dry-run）。确认无误后加 --write，落到 ${join(SNIPPETS_DIR, group)}/`)
+        break
+      }
+      const written = writePlan(plan, opts)
+      console.log(`\n写入 ${written} 条 → ${join(SNIPPETS_DIR, group)}/（已存在的跳过，不覆盖）`)
+      break
+    }
+
+    case 'runs': {
+      const log = new RunLog(RUNS_DIR)
+      const arg = positional[0]
+      const stamp = (ms: number) => new Date(ms).toLocaleString('sv-SE')
+      if (arg && /^\d{8}-\d{6}-[a-z0-9]{4}$/.test(arg)) {
+        const d = log.read(arg)
+        if (!d) {
+          console.error(`run 不存在: ${arg}`)
+          process.exitCode = 2
+          break
+        }
+        console.log(`${d.meta.snippetId} · ${stamp(d.meta.startedAt)} · targets=${d.meta.targets.join(',')}`)
+        if (d.meta.vars && Object.keys(d.meta.vars).length > 0) {
+          console.log(`vars: ${Object.entries(d.meta.vars).map(([k, v]) => `${k}=${v}`).join(' ')}`)
+        }
+        for (const ev of d.events) {
+          switch (ev.type) {
+            case 'start':
+              if (ev.stepIndex >= 0 && ev.cmd) console.log(`$ ${ev.cmd}`)
+              break
+            case 'queued':
+              console.log(`⏳ 排队 ${(ev.waitedMs / 1000).toFixed(1)}s`)
+              break
+            case 'stdout':
+              process.stdout.write(ev.data.endsWith('\n') ? ev.data : ev.data + '\n')
+              break
+            case 'stderr':
+              process.stderr.write(ev.data.endsWith('\n') ? ev.data : ev.data + '\n')
+              break
+            case 'step':
+              console.log(
+                `${ev.ok ? '✓' : '✗'} step${ev.stepIndex}${
+                  ev.expect !== undefined
+                    ? ` match /${ev.expect}/${ev.matched ? ` → ${ev.matched}` : ''}`
+                    : ` exit=${ev.exitCode ?? '-'}`
+                } ${ev.durationMs}ms${ev.note ? ` · ${ev.note}` : ''}`,
+              )
+              break
+            case 'error':
+              console.error(`ERROR: ${ev.message}`)
+              break
+            case 'exit':
+              // exit 在档案里每个目标一条，用 target 标出来，否则多目标时分不清谁收尾了
+              console.log(`${ev.ok ? '✓' : '✗'} ${ev.target ?? ''} ${ev.ok ? 'done' : 'failed'} ${ev.durationMs}ms`)
+              break
+          }
+        }
+        console.log(d.summary ? (d.summary.ok ? '\n档案：全部成功' : '\n档案：有失败') : '\n档案没有 summary（进程可能被强杀）')
+        break
+      }
+      const n = Number(arg ?? 20) || 20
+      const items = log.list(n)
+      if (items.length === 0) {
+        console.log(`还没有运行记录（${RUNS_DIR}）`)
+        break
+      }
+      for (const r of items) {
+        console.log(
+          `${r.ok ? '✓' : '✗'} ${stamp(r.startedAt)}  ${r.snippetId}  ${r.targets.join(',')}  ${r.durationMs ?? '-'}ms  ${r.runId}`,
+        )
+      }
       break
     }
 
@@ -180,7 +302,13 @@ async function main(): Promise<void> {
     }
 
     default:
-      console.log('snip list | search <q> | run <id> [--var k=v | --k=v ...] [--yes] | hosts | status | reindex')
+      console.log(
+        [
+          'snip list | search <q> | run <id> [--var k=v | --k=v ...] [--yes] | hosts | status | reindex',
+          'snip runs [n] | runs <runId>',
+          'snip import-history [--from ps|bash|file:<path>] [--limit 100] [--group 历史导入] [--shell cmd|powershell] [--write] [--force]',
+        ].join('\n'),
+      )
       console.log(`data dir: ${DATA_DIR}`)
   }
 }

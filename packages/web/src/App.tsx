@@ -1,5 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ApiError, api, getToken, setToken, type HealthView, type RunEvent, type SnippetView } from './api'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import {
+  ApiError,
+  api,
+  getToken,
+  setToken,
+  type HealthView,
+  type HostView,
+  type RunDetailView,
+  type RunEvent,
+  type RunListItem,
+  type SnippetView,
+} from './api'
 
 type VarDraft = Record<string, string>
 
@@ -7,8 +18,10 @@ type VarDraft = Record<string, string>
 type LineKind = 'cmd' | 'step' | 'queue' | 'out' | 'err' | 'meta'
 type Line = { kind: LineKind; text: string; ok?: boolean }
 
-type Output = {
-  id: string
+/** 一个目标一块面板。多目标时并列展示，单目标时只渲染它、不显示面板头 */
+type Pane = {
+  target: string
+  index: number
   lines: Line[]
   running: boolean
   ok?: boolean
@@ -19,9 +32,21 @@ type Output = {
   /** 失败但退出码为 0 时的说明（桥 ERR| 前缀） */
   note?: string
 }
-type Draft = { snippet: SnippetView; vars: VarDraft; confirmed: boolean }
+type Output = {
+  id: string
+  panes: Pane[]
+  startedAt: number
+  /** 服务端档案编号：首条 start 事件带回来，断开后能凭它回看 */
+  runId?: string
+  /** 从档案回放出来的（不是本次真跑的）：不跑计时、头部显示历史时间 */
+  replayed?: boolean
+  replayedAt?: number
+}
+type Draft = { snippet: SnippetView; vars: VarDraft; confirmed: boolean; targets: string[] }
 
 const MAX_LINES = 2000
+/** 与服务端 packages/server/src/app.ts 的 MAX_TARGETS 对齐（那边只是防呆，前端也拦一道才有好体验） */
+const MAX_TARGETS = 8
 const ANSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g
 
 function clean(text: string): string {
@@ -38,14 +63,173 @@ function toLines(kind: LineKind, text: string): Line[] {
     }))
 }
 
+/** `2026-10-29 22:48:12`，历史列表与回放头部共用 */
+function fmtWhen(ms: number): string {
+  const d = new Date(ms)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+/** 一条 step 事件怎么显示：expect 步要能看出「在等什么 / 命中了什么」 */
+function stepText(ev: Extract<RunEvent, { type: 'step' }>): string {
+  if (ev.expect !== undefined) {
+    return ev.ok
+      ? `step${ev.stepIndex} match /${ev.expect}/ → ${ev.matched ?? ''}`
+      : `step${ev.stepIndex} 未命中 /${ev.expect}/${ev.note ? ` · ${ev.note}` : ''}`
+  }
+  return `step${ev.stepIndex} exit=${ev.exitCode ?? '-'} ${ev.durationMs}ms${ev.note ? ' · ERR' : ''}`
+}
+
 /** 小于 1s 时显示毫秒：`完成 29ms` 比 `完成 0.0s` 有信息量 */
 function fmtDur(ms: number | undefined): string {
   if (ms == null) return '-'
   return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`
 }
 
+function paneStatus(p: Pane, now: number): string {
+  if (p.running) return `运行中 ${fmtDur(now - p.startedAt)}`
+  if (p.ok) return `完成 ${fmtDur(p.durationMs)}`
+  if (p.timedOut) return '超时'
+  if (p.note) return `失败 · 桥侧报错 · ${fmtDur(p.durationMs)}`
+  return `失败${p.exitCode != null ? ` exit=${p.exitCode}` : ''}${p.durationMs != null ? ` · ${fmtDur(p.durationMs)}` : ''}`
+}
+
+/** 同一目标开多次时才加 #序号，否则标题就是目标名 */
+function paneLabel(panes: Pane[], p: Pane): string {
+  const same = panes.filter((x) => x.target === p.target)
+  return same.length > 1 ? `${p.target} #${same.indexOf(p) + 1}` : p.target
+}
+
+/** 一条事件落到哪块面板：优先服务端打的 targetIndex，退回按 target 名找，最后兜底第一块 */
+function paneIndexOf(o: Output, ev: RunEvent): number {
+  if (typeof ev.targetIndex === 'number' && o.panes[ev.targetIndex]) return ev.targetIndex
+  if (ev.target) {
+    const i = o.panes.findIndex((p) => p.target === ev.target)
+    if (i >= 0) return i
+  }
+  return 0
+}
+
+function applyEvent(o: Output, ev: RunEvent): Output {
+  const idx = paneIndexOf(o, ev)
+  const pane = o.panes[idx]
+  if (!pane) return o
+
+  const extra: Line[] = []
+  let { running, ok, durationMs, timedOut, exitCode, note } = pane
+  switch (ev.type) {
+    case 'start':
+      if (ev.cmd) extra.push({ kind: 'cmd', text: ev.cmd })
+      break
+    case 'queued':
+      extra.push({ kind: 'queue', text: `队列等待 ${(ev.waitedMs / 1000).toFixed(1)}s` })
+      break
+    case 'stdout':
+      extra.push(...toLines('out', ev.data))
+      break
+    case 'stderr':
+      extra.push(...toLines('err', ev.data))
+      break
+    case 'step':
+      extra.push({ kind: 'step', ok: ev.ok, text: stepText(ev) })
+      break
+    case 'exit':
+      running = false
+      ok = ev.ok
+      durationMs = ev.durationMs
+      timedOut = ev.timedOut
+      exitCode = ev.exitCode
+      note = ev.note
+      extra.push({
+        kind: 'step',
+        ok: ev.ok,
+        text: ev.ok
+          ? `done ${ev.durationMs}ms`
+          : ev.timedOut
+            ? '超时被终止（命令可能仍在桌面会话里跑）'
+            : ev.note
+              ? `桥侧报错（退出码 ${ev.exitCode ?? 0}）`
+              : `failed exit=${ev.exitCode ?? '-'}`,
+      })
+      break
+    case 'error':
+      running = false
+      ok = false
+      extra.push({ kind: 'err', text: `ERROR ${ev.message}` })
+      break
+  }
+
+  const next: Pane = {
+    ...pane,
+    lines: [...pane.lines, ...extra].slice(-MAX_LINES),
+    running,
+    ok,
+    durationMs,
+    exitCode,
+    timedOut,
+    note,
+  }
+  return {
+    ...o,
+    // 首条 start 带的 runId 存住：抽屉关闭后仍能在历史里找到这一次
+    runId: ev.type === 'start' ? (ev.runId ?? o.runId) : o.runId,
+    panes: o.panes.map((p, i) => (i === idx ? next : p)),
+  }
+}
+
+/**
+ * 把一份档案（meta + 事件流 + summary）还原成抽屉里的多面板结构。
+ * 事件是原样存下来的，所以走同一套 `applyEvent` —— 回放和实时看到的排版必须一致，
+ * 否则「档案里长这样」就不可信了。
+ */
+function replayOutput(d: RunDetailView): Output {
+  const targets = d.meta.targets.length > 0 ? d.meta.targets : ['default']
+  let o: Output = {
+    id: d.meta.snippetId,
+    runId: d.meta.runId,
+    replayed: true,
+    replayedAt: d.meta.startedAt,
+    startedAt: d.meta.startedAt,
+    panes: targets.map((t, i) => {
+      const sum = d.summary?.panes.find((p) => p.targetIndex === i)
+      return {
+        target: t,
+        index: i,
+        running: false,
+        startedAt: d.meta.startedAt,
+        ok: sum?.ok,
+        durationMs: sum?.durationMs,
+        exitCode: sum?.exitCode,
+        timedOut: sum?.timedOut,
+        note: sum?.note,
+        lines: [],
+      }
+    }),
+  }
+  for (const ev of d.events) o = applyEvent(o, ev)
+  // 进程被 kill 时档案里没有 exit 事件：用 summary 把状态补回去，
+  // 不然历史面板会停在「运行中」——那是回放永远等不到的东西
+  o = {
+    ...o,
+    panes: o.panes.map((p, i) => {
+      const sum = d.summary?.panes.find((s) => s.targetIndex === i)
+      return {
+        ...p,
+        running: false,
+        ok: p.ok ?? sum?.ok ?? false,
+        durationMs: p.durationMs ?? sum?.durationMs,
+        exitCode: p.exitCode ?? sum?.exitCode,
+        timedOut: p.timedOut ?? sum?.timedOut,
+        note: p.note ?? sum?.note,
+      }
+    }),
+  }
+  return o
+}
+
 export function App() {
   const [snippets, setSnippets] = useState<SnippetView[]>([])
+  const [hosts, setHosts] = useState<HostView[]>([])
   const [health, setHealth] = useState<HealthView | null>(null)
   const [q, setQ] = useState('')
   const [active, setActive] = useState(0)
@@ -61,14 +245,19 @@ export function App() {
   const [tokenError, setTokenError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [tick, setTick] = useState(0)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyRuns, setHistoryRuns] = useState<RunListItem[] | null>(null)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+  const [replayId, setReplayId] = useState<string | null>(null)
 
-  const bodyRef = useRef<HTMLPreElement | null>(null)
+  const panesRef = useRef<HTMLDivElement | null>(null)
 
   const refresh = useCallback(async () => {
     try {
-      const [list, h] = await Promise.all([api.snippets(), api.health()])
+      const [list, h, hs] = await Promise.all([api.snippets(), api.health(), api.hosts()])
       setSnippets(list)
       setHealth(h)
+      setHosts(hs)
       setNeedToken(false)
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setNeedToken(true)
@@ -94,7 +283,7 @@ export function App() {
   // health 有 30s TTL + 单飞去重，密采样不打桥。
   // 另有一个辅助触发点在 doRun 里：收到 `queued` 事件时刷一次（注意它是在**等待结束**时才发的，
   // 所以不能当主路径，只用来收尾）。
-  const running = !!output?.running
+  const running = !!output?.panes.some((p) => p.running)
   useEffect(() => {
     const timer = setInterval(
       () => {
@@ -115,16 +304,19 @@ export function App() {
 
   // 运行中的计时
   useEffect(() => {
-    if (!output?.running) return
+    if (!running) return
     const t = setInterval(() => setTick((n) => n + 1), 200)
     return () => clearInterval(t)
-  }, [output?.running])
+  }, [running])
 
-  // 输出自动滚到底
+  // 自动滚动：实时运行滚到底（看最新输出），历史回放回到顶部（从头读）
   useEffect(() => {
-    const el = bodyRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [output?.lines.length, output?.running])
+    const root = panesRef.current
+    if (!root) return
+    root.querySelectorAll<HTMLElement>('.drawer-body').forEach((el) => {
+      el.scrollTop = output?.replayed ? 0 : el.scrollHeight
+    })
+  }, [output])
 
   const groups = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -162,6 +354,7 @@ export function App() {
       const typing = !!target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)
 
       if (e.key === 'Escape') {
+        if (historyOpen) return setHistoryOpen(false)
         if (showSettings || needToken) return setShowSettings(false)
         if (draft) return setDraft(null)
         if (danger) return setDanger(null)
@@ -182,6 +375,31 @@ export function App() {
         return
       }
 
+      // `T` = 对当前选中的卡片打开目标选择器（Enter 是直接执行）。
+      // 多开入口在指针设备上是隐藏的，键盘用户需要一个不靠鼠标的入口（ISSUE-008）。
+      if (!typing && !draft && !danger && !showSettings && !needToken && e.key.toLowerCase() === 't' && !e.ctrlKey && !e.metaKey && !e.altKey && flat[active]) {
+        e.preventDefault()
+        openSnippet(flat[active]!, false, true)
+        return
+      }
+
+      // `H` = 运行历史（断开页面后回看上一次跑了什么）
+      if (
+        !typing &&
+        !draft &&
+        !danger &&
+        !showSettings &&
+        !needToken &&
+        e.key.toLowerCase() === 'h' &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey
+      ) {
+        e.preventDefault()
+        void openHistory()
+        return
+      }
+
       if (typing && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
         e.preventDefault()
         setActive((i) => Math.max(0, Math.min(flat.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1))))
@@ -197,7 +415,13 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  function openSnippet(s: SnippetView, confirmed = false) {
+  // 片段没写 target 时，服务端会挑 default 或第一个非 reserved 目标；前端只需要一个显示名
+  const fallbackTarget = useMemo(() => {
+    const usable = hosts.filter((h) => !h.reserved)
+    return (usable.find((h) => h.default) ?? usable[0])?.name
+  }, [hosts])
+
+  function openSnippet(s: SnippetView, confirmed = false, forceForm = false) {
     // 点过的卡片同步成键盘选中项，↑↓ 继续在这一行附近走
     const i = activeIndex.get(s.id)
     if (i != null) setActive(i)
@@ -206,107 +430,99 @@ export function App() {
       return
     }
     const names = Object.keys(s.vars)
-    if (names.length > 0) {
+    if (names.length > 0 || forceForm) {
       const vars: VarDraft = {}
       for (const k of names) {
         const v = s.vars[k]!
         vars[k] = v.default != null ? String(v.default) : ''
       }
       setFormError(null)
-      setDraft({ snippet: s, vars, confirmed })
+      setDraft({
+        snippet: s,
+        vars,
+        confirmed,
+        targets: [s.target ?? fallbackTarget].filter((t): t is string => !!t),
+      })
       setPreview(null)
     } else {
-      void doRun(s, {}, confirmed)
+      void doRun(s, {}, confirmed, [])
     }
   }
 
-  async function doRun(s: SnippetView, vars: VarDraft, confirmed: boolean) {
-    setOutput({
-      id: s.id,
-      lines: [{ kind: 'meta', text: `${s.id}${s.target ? ' · ' + s.target : ''} · 开始` }],
-      running: true,
-      startedAt: Date.now(),
-    })
-    setWrap(false)
-    setDraft(null)
-    setDanger(null)
-    setFormError(null)
-    setCopied(false)
-    try {
-      await api.run(s.id, vars, confirmed, (ev: RunEvent) => {
-        setOutput((o) => {
-          if (!o) return o
-          const extra: Line[] = []
-          let { running, ok, durationMs, timedOut, exitCode, note } = o
-          switch (ev.type) {
-            case 'start':
-              if (ev.cmd && !ev.cmd.startsWith('[')) extra.push({ kind: 'cmd', text: ev.cmd })
-              break
-            case 'queued':
-              extra.push({ kind: 'queue', text: `队列等待 ${(ev.waitedMs / 1000).toFixed(1)}s` })
-              break
-            case 'stdout':
-              extra.push(...toLines('out', ev.data))
-              break
-            case 'stderr':
-              extra.push(...toLines('err', ev.data))
-              break
-            case 'step':
-              extra.push({
-                kind: 'step',
-                ok: ev.ok,
-                text: `step${ev.stepIndex} exit=${ev.exitCode ?? '-'} ${ev.durationMs}ms${ev.note ? ' · ERR' : ''}`,
-              })
-              break
-            case 'exit':
-              running = false
-              ok = ev.ok
-              durationMs = ev.durationMs
-              timedOut = ev.timedOut
-              exitCode = ev.exitCode
-              note = ev.note
-              extra.push({
-                kind: 'step',
-                ok: ev.ok,
-                text: ev.ok
-                  ? `done ${ev.durationMs}ms`
-                  : ev.timedOut
-                    ? '超时被终止（命令可能仍在桌面会话里跑）'
-                    : ev.note
-                      ? `桥侧报错（退出码 ${ev.exitCode ?? 0}）`
-                      : `failed exit=${ev.exitCode ?? '-'}`,
-              })
-              break
-            case 'error':
-              running = false
-              ok = false
-              extra.push({ kind: 'err', text: `ERROR ${ev.message}` })
-              break
-          }
-          return {
-            ...o,
-            lines: [...o.lines, ...extra].slice(-MAX_LINES),
-            running,
-            ok,
-            durationMs,
-            exitCode,
-            timedOut,
-            note,
-          }
-        })
-        // 徽标的主路径：收到 queued 事件的那一刻服务端 queue 必然 > 0，一刷必中；
-        // 收尾（exit/error）也刷一次，把徽标清回去。
-        if (ev.type === 'queued' || ev.type === 'exit' || ev.type === 'error') refreshHealth()
+  async function doRun(
+    s: SnippetView,
+    vars: VarDraft,
+    confirmed: boolean,
+    targets: string[],
+    fromDraft: Draft | null = null,
+  ) {
+    // 空数组 = 交给服务端按片段/默认目标决定；但面板要有标题，所以前端补一个显示名
+    const formTargets =
+      targets.length > 0 ? targets : [s.target ?? fallbackTarget].filter((t): t is string => !!t)
+    const shown = formTargets.length > 0 ? formTargets : ['default']
+
+    // 抽屉要等 200 才开：被 400 拒掉的请求不该先长出 N 块空面板，再把同一句错误重复 N 遍（ISSUE-007）
+    let opened = false
+    const openOutput = () => {
+      opened = true
+      const now = Date.now()
+      setOutput({
+        id: s.id,
+        panes: shown.map((t, i) => ({
+          target: t,
+          index: i,
+          running: true,
+          startedAt: now,
+          lines: shown.length === 1 ? [{ kind: 'meta' as LineKind, text: `${s.id} · ${t} · 开始` }] : [],
+        })),
+        startedAt: now,
       })
+      setWrap(false)
+      setDraft(null)
+      setDanger(null)
+      setFormError(null)
+      setCopied(false)
+    }
+
+    try {
+      await api.run(
+        s.id,
+        vars,
+        confirmed,
+        targets,
+        (ev: RunEvent) => {
+          setOutput((o) => (o ? applyEvent(o, ev) : o))
+          // 徽标的主路径：收到 queued 事件的那一刻服务端 queue 必然 > 0，一刷必中；
+          // 收尾（exit/error）也刷一次，把徽标清回去。
+          if (ev.type === 'queued' || ev.type === 'exit' || ev.type === 'error') refreshHealth()
+        },
+        openOutput,
+      )
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setNeedToken(true)
+      const message = e instanceof ApiError ? e.message : String(e)
+      if (!opened) {
+        // 请求被拒（400/404…）：错误回到表单里，面板一个都不开，用户填的东西也还留着
+        setDraft(fromDraft ?? { snippet: s, vars, confirmed, targets: formTargets })
+        setFormError(message)
+        return
+      }
       setOutput((o) =>
         o
           ? {
               ...o,
-              lines: [...o.lines, { kind: 'err' as const, text: `ERROR ${String(e)}` }].slice(-MAX_LINES),
-              running: false,
-              ok: false,
+              panes: o.panes.map((p) =>
+                p.running
+                  ? {
+                      ...p,
+                      running: false,
+                      ok: false,
+                      lines: [...p.lines, { kind: 'err' as const, text: `ERROR ${message}` }].slice(
+                        -MAX_LINES,
+                      ),
+                    }
+                  : p,
+              ),
             }
           : o,
       )
@@ -315,6 +531,15 @@ export function App() {
 
   function submitDraft() {
     if (!draft) return
+    if (draft.targets.length === 0) {
+      setFormError('至少选一个目标')
+      return
+    }
+    if (draft.targets.length > MAX_TARGETS) {
+      // 服务端会 400，但等它回来才拦就已经太晚了：先把话说在前面
+      setFormError(`最多 ${MAX_TARGETS} 个目标，当前 ${draft.targets.length} 个`)
+      return
+    }
     const missing = Object.entries(draft.snippet.vars)
       .filter(([k, v]) => v.required && !String(draft.vars[k] ?? '').trim())
       .map(([, v]) => v.prompt ?? '未命名参数')
@@ -322,7 +547,7 @@ export function App() {
       setFormError(`请填写：${missing.join('、')}`)
       return
     }
-    void doRun(draft.snippet, draft.vars, draft.confirmed)
+    void doRun(draft.snippet, draft.vars, draft.confirmed, draft.targets, draft)
   }
 
   async function loadPreview() {
@@ -337,7 +562,14 @@ export function App() {
 
   async function copyOutput() {
     if (!output) return
-    const text = output.lines.map((l) => l.text).join('\n')
+    const text =
+      output.panes.length > 1
+        ? output.panes
+            .map(
+              (p) => `=== ${paneLabel(output.panes, p)} ===\n${p.lines.map((l) => l.text).join('\n')}`,
+            )
+            .join('\n\n')
+        : (output.panes[0]?.lines ?? []).map((l) => l.text).join('\n')
     try {
       await navigator.clipboard.writeText(text)
     } catch {
@@ -352,8 +584,35 @@ export function App() {
     setTimeout(() => setCopied(false), 1200)
   }
 
-  async function saveToken() {
-    setToken(tokenInput.trim())
+  async function openHistory() {
+    setHistoryOpen(true)
+    setHistoryError(null)
+    setHistoryRuns(null)
+    try {
+      setHistoryRuns(await api.runs(30))
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) setNeedToken(true)
+      setHistoryError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  async function replayRun(runId: string) {
+    setReplayId(runId)
+    setHistoryError(null)
+    try {
+      const d = await api.runDetail(runId)
+      setOutput(replayOutput(d))
+      setHistoryOpen(false)
+      setWrap(false)
+      setCopied(false)
+    } catch (e) {
+      setHistoryError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setReplayId(null)
+    }
+  }
+
+  async function saveToken() {    setToken(tokenInput.trim())
     try {
       const h = await api.health()
       setHealth(h)
@@ -366,21 +625,29 @@ export function App() {
     }
   }
 
-  const elapsed = output ? (output.running ? Date.now() - output.startedAt : output.durationMs ?? 0) : 0
+  const panes = output?.panes ?? []
+  const multi = panes.length > 1
+  const now = Date.now()
+  const doneCount = panes.filter((p) => !p.running).length
+  const okCount = panes.filter((p) => p.ok).length
+  const elapsed = !output
+    ? 0
+    : running
+      ? now - output.startedAt
+      : panes.reduce((m, p) => Math.max(m, p.durationMs ?? 0), 0)
   void tick
   const tokenSet = !!getToken()
   const settingsOpen = showSettings || needToken
   const statusText = !output
     ? ''
-    : output.running
-      ? `运行中 ${fmtDur(elapsed)}`
-      : output.ok
-        ? `完成 ${fmtDur(output.durationMs)}`
-        : output.timedOut
-        ? '超时'
-        : output.note
-          ? `失败 · 桥侧报错 · ${fmtDur(output.durationMs)}`
-          : `失败${output.exitCode != null ? ` exit=${output.exitCode}` : ''}${output.durationMs != null ? ` · ${fmtDur(output.durationMs)}` : ''}`
+    : multi
+      ? running
+        ? `${doneCount}/${panes.length} 完成 · ${fmtDur(elapsed)}`
+        : `${okCount}/${panes.length} 成功 · ${fmtDur(elapsed)}`
+      : panes[0]
+        ? paneStatus(panes[0], now)
+        : ''
+  const drawerState = running ? 'running' : panes.length > 0 && panes.every((p) => p.ok) ? 'ok' : 'fail'
 
   return (
     <div className="app">
@@ -400,6 +667,14 @@ export function App() {
           ) : null}
           <button className="icon-btn" onClick={() => void refresh()} aria-label="刷新" title="刷新（R）">
             ⟳
+          </button>
+          <button
+            className={`icon-btn${output?.replayed ? ' on' : ''}`}
+            onClick={() => void openHistory()}
+            aria-label="运行历史"
+            title="运行历史（H）"
+          >
+            🕘
           </button>
           <button
             className={`icon-btn${tokenSet ? ' on' : ''}`}
@@ -442,7 +717,7 @@ export function App() {
               </button>
             ))}
           </nav>
-          <p className="nav-hint">/ 搜索 · ↑↓ 选择 · Enter 执行 · Esc 关闭</p>
+          <p className="nav-hint">/ 搜索 · ↑↓ 选择 · Enter 执行 · T 选目标 · H 历史 · Esc 关闭</p>
         </aside>
 
         <div className="content">
@@ -490,6 +765,22 @@ export function App() {
                           {Object.keys(s.vars).length > 0 ? ` · ${Object.keys(s.vars).length} 变量` : ''}
                           {s.danger ? ' · danger' : ''}
                         </span>
+                        {/* 多开入口：卡片本身是 button，不能嵌 button，用 span 承担点击。
+                            隐形时 pointer-events:none，键盘走 `T`（见快捷键）——要塞进 Tab 序列就得嵌
+                            交互控件，读屏体验更差（ISSUE-008） */}
+                        <span
+                          className="card-fan"
+                          role="button"
+                          tabIndex={-1}
+                          aria-label="选择执行目标"
+                          title="选目标 / 同目标多开（选中卡片后按 T）"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            openSnippet(s, false, true)
+                          }}
+                        >
+                          ⊕
+                        </span>
                       </button>
                     )
                   })}
@@ -507,8 +798,72 @@ export function App() {
             <h3>{draft.snippet.title}</h3>
             <p className="modal-sub">
               {draft.snippet.id}
-              {draft.snippet.target ? ` · ${draft.snippet.target}` : ''} · {draft.snippet.steps} 步
+              {draft.snippet.target ? ` · ${draft.snippet.target}` : ''} · {draft.snippet.steps} 步 ·{' '}
+              {draft.targets.length} 目标
             </p>
+            <div className="field">
+              <span>
+                目标 <em className="hint">点一次加一个；同一目标可重复 = 同目标多开</em>
+              </span>
+              <div className="chips">
+                {draft.targets.map((t, i) => {
+                  const same = draft.targets.filter((x) => x === t)
+                  return (
+                    <span className="chip" key={`${t}-${i}`}>
+                      {t}
+                      {same.length > 1
+                        ? ` #${draft.targets.slice(0, i + 1).filter((x) => x === t).length}`
+                        : ''}
+                      <button
+                        type="button"
+                        className="chip-x"
+                        aria-label={`移除 ${t}`}
+                        onClick={() =>
+                          setDraft({ ...draft, targets: draft.targets.filter((_, k) => k !== i) })
+                        }
+                      >
+                        ×
+                      </button>
+                    </span>
+                  )
+                })}
+                {draft.targets.length === 0 && <span className="chip-empty">未选目标</span>}
+              </div>
+              <div className="target-add">
+                {hosts.map((h) => {
+                  const full = draft.targets.length >= MAX_TARGETS
+                  return (
+                    <button
+                      key={h.name}
+                      type="button"
+                      className="target-btn"
+                      disabled={h.reserved || full}
+                      title={
+                        full
+                          ? `最多 ${MAX_TARGETS} 个目标`
+                          : h.reserved
+                            ? `P5 预留（driver=${h.driver}）`
+                            : `driver=${h.driver}`
+                      }
+                      onClick={() => {
+                        // disabled 已经拦住常规点击；这里再判一次，避免键盘/脚本绕过属性直接触发
+                        if (draft.targets.length >= MAX_TARGETS) {
+                          setFormError(`最多 ${MAX_TARGETS} 个目标`)
+                          return
+                        }
+                        setDraft({ ...draft, targets: [...draft.targets, h.name] })
+                      }}
+                    >
+                      {h.name}
+                      <em>{h.reserved ? 'P5' : '+'}</em>
+                    </button>
+                  )
+                })}
+              </div>
+              {draft.targets.length >= MAX_TARGETS && (
+                <p className="field-note">最多 {MAX_TARGETS} 个目标（服务端上限）</p>
+              )}
+            </div>
             {Object.entries(draft.snippet.vars).map(([k, v]) => (
               <label key={k} className="field">
                 <span>
@@ -615,13 +970,65 @@ export function App() {
         </div>
       )}
 
+      {historyOpen && (
+        <div className="modal-mask" onClick={() => setHistoryOpen(false)}>
+          <div className="modal history-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>运行历史</h3>
+            <p className="modal-sub">
+              每次执行服务端都会落一份档案（<code>data/runs/&lt;runId&gt;.jsonl</code>）；断网、关页面之后也能回看。
+              secret 变量的值在档案里已抹成 <code>***</code>。
+            </p>
+            {historyError && <p className="form-error">{historyError}</p>}
+            {historyRuns === null && !historyError && <p className="empty">读取中…</p>}
+            {historyRuns?.length === 0 && <p className="empty">还没有运行记录</p>}
+            <div className="run-list">
+              {historyRuns?.map((r) => (
+                <button
+                  key={r.runId}
+                  type="button"
+                  className={`run-row${r.ok ? ' ok' : ' fail'}`}
+                  onClick={() => void replayRun(r.runId)}
+                  disabled={replayId === r.runId}
+                  title={`${r.runId}${r.vars && Object.keys(r.vars).length > 0 ? ` · ${Object.entries(r.vars).map(([k, v]) => `${k}=${v}`).join(' ')}` : ''}`}
+                >
+                  <span className="run-when">{fmtWhen(r.startedAt)}</span>
+                  <span className="run-id">{r.snippetId}</span>
+                  <span className="run-meta">
+                    {r.targets.length > 1 ? `${r.targets.length} 目标` : (r.targets[0] ?? '-')}
+                    {' · '}
+                    {fmtDur(r.durationMs)}
+                  </span>
+                  <span className={`run-state ${r.ok ? 'ok' : 'fail'}`}>{r.ok ? '✓' : '✗'}</span>
+                </button>
+              ))}
+            </div>
+            <div className="modal-actions">
+              <span className="modal-hint">{historyRuns ? `${historyRuns.length} 条` : ''}</span>
+              <button className="btn ghost" onClick={() => setHistoryOpen(false)}>
+                关闭
+              </button>
+              <button className="btn" onClick={() => void openHistory()}>
+                刷新
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {output && (
-        <div className={`drawer${output.running ? ' running' : output.ok ? ' ok' : ' fail'}${wrap ? ' wrap' : ''}`}>
+        <div className={`drawer ${drawerState}${multi ? ' multi' : ''}${wrap ? ' wrap' : ''}`}>
           <div className="drawer-head">
             <span className="drawer-id">{output.id}</span>
-            <span className={`drawer-status ${output.running ? 'run' : output.ok ? 'ok' : 'fail'}`}>
+            {output.replayed && output.replayedAt ? (
+              <span className="drawer-badge" title={`档案 ${output.runId ?? ''} · ${fmtWhen(output.replayedAt)}`}>
+                <span className="badge-ico">🕘</span>
+                <span className="badge-when">{fmtWhen(output.replayedAt)}</span>
+              </span>
+            ) : null}
+            <span className={`drawer-status ${drawerState === 'running' ? 'run' : drawerState}`}>
               {statusText}
             </span>
+            {multi && <span className="drawer-count">{panes.length} 目标</span>}
             <span className="drawer-tools">
               <button
                 className={`icon-btn${wrap ? ' on' : ''}`}
@@ -639,20 +1046,41 @@ export function App() {
               </button>
             </span>
           </div>
-          <pre className="drawer-body" ref={bodyRef}>
-            {output.lines.map((l, i) => (
-              <span
-                key={i}
-                className={`line line-${l.kind}${l.kind === 'step' ? (l.ok ? ' ok' : ' bad') : ''}`}
-              >
-                {l.kind === 'cmd' ? <span className="line-mark">$ </span> : null}
-                {l.kind === 'step' ? <span className="line-mark">{l.ok ? '✓ ' : '✗ '}</span> : null}
-                {l.kind === 'queue' ? <span className="line-mark">⏳ </span> : null}
-                {l.kind === 'err' ? <span className="line-mark">! </span> : null}
-                {l.text}
-              </span>
+          <div
+            className={`panes${multi ? ' multi' : ''}`}
+            ref={panesRef}
+            style={multi ? ({ '--cols': Math.min(panes.length, 3) } as CSSProperties) : undefined}
+          >
+            {panes.map((p) => (
+              <section className="pane" key={`${p.target}-${p.index}`}>
+                {multi && (
+                  <div className="pane-head">
+                    <span className="pane-target">{paneLabel(panes, p)}</span>
+                    <span
+                      className={`pane-status ${p.running ? 'run' : p.ok ? 'ok' : 'fail'}`}
+                      data-ok={p.ok ? '1' : '0'}
+                    >
+                      {paneStatus(p, now)}
+                    </span>
+                  </div>
+                )}
+                <pre className="drawer-body">
+                  {p.lines.map((l, i) => (
+                    <span
+                      key={i}
+                      className={`line line-${l.kind}${l.kind === 'step' ? (l.ok ? ' ok' : ' bad') : ''}`}
+                    >
+                      {l.kind === 'cmd' ? <span className="line-mark">$ </span> : null}
+                      {l.kind === 'step' ? <span className="line-mark">{l.ok ? '✓ ' : '✗ '}</span> : null}
+                      {l.kind === 'queue' ? <span className="line-mark">⏳ </span> : null}
+                      {l.kind === 'err' ? <span className="line-mark">! </span> : null}
+                      {l.text}
+                    </span>
+                  ))}
+                </pre>
+              </section>
             ))}
-          </pre>
+          </div>
         </div>
       )}
     </div>

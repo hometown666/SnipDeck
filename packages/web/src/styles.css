@@ -171,7 +171,49 @@ body {
   border: 1px solid var(--border);
   background: var(--surface);
   cursor: pointer;
+  position: relative;
   transition: transform 0.06s ease, border-color 0.12s ease;
+}
+
+/* 多开入口（⊕）：手机上常显，指针设备悬停才显示 */
+.card-fan {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-2);
+  opacity: 0.55;
+  border: 1px solid transparent;
+}
+
+.card-fan:hover {
+  opacity: 1;
+  color: var(--accent);
+  border-color: var(--border);
+  background: var(--bg);
+}
+
+/* 隐形时连命中测试一起关掉：看不见却能吃掉点击的 22×22 热区，
+   对触摸屏笔记本和「手快先按下」都是坑（ISSUE-008）。
+   显形必须挂在 `.card:hover` 上——`pointer-events:none` 的元素永远不会自己 hover。 */
+@media (hover: hover) {
+  .card-fan {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .card:hover .card-fan,
+  .card:focus-within .card-fan {
+    opacity: 0.7;
+    pointer-events: auto;
+  }
 }
 
 .card:active {
@@ -274,6 +316,80 @@ body {
   font-size: 13px;
 }
 
+/* ——— 运行历史（P4） ——— */
+.history-modal {
+  max-width: 640px;
+}
+
+.run-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* 历史可能几十条：弹窗内滚动，别把整个 modal 撑到天上去 */
+  max-height: 52vh;
+  overflow: auto;
+  margin: 4px 0 12px;
+}
+
+.run-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.run-row:hover {
+  border-color: var(--accent);
+}
+
+.run-row:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.run-when {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.run-id {
+  font-family: var(--mono);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-meta {
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.run-state {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.run-state.ok {
+  color: var(--accent);
+}
+
+.run-state.fail {
+  color: var(--danger);
+}
+
 .field {
   display: block;
   margin-bottom: 12px;
@@ -295,6 +411,111 @@ body {
   color: var(--danger);
   font-size: 13px;
   margin: 8px 0 0;
+}
+
+/* 目标数到上限时的静态提示（不是错误，别用红色） */
+.field-note {
+  color: var(--text-2);
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
+/* ---------------- 目标选择（P3） ---------------- */
+
+.field span .hint {
+  color: var(--text-2);
+  font-weight: 400;
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+  min-height: 30px;
+  align-items: center;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  border: 1px solid transparent;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.chip-x {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.chip-x:hover {
+  opacity: 1;
+}
+
+.chip-empty {
+  font-size: 12.5px;
+  color: var(--danger);
+}
+
+.target-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.target-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.target-btn em {
+  font-style: normal;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.target-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  border-style: solid;
+  color: var(--accent);
+}
+
+/* reserved 目标（P5 预留）：看得见、点不动 */
+.target-btn:disabled {
+  cursor: not-allowed;
+  color: #b3b2ab;
+  border-color: var(--border);
+  background: var(--bg);
+}
+
+.target-btn:disabled em {
+  color: #b3b2ab;
+  font-size: 11px;
 }
 
 .field input,
@@ -393,15 +614,51 @@ body {
   font-size: 14px;
 }
 
+/* 单行、超长省略：多目标时头部要挤下「id + 状态 + 目标数 + 三个按钮」，
+   390 宽下 flex 会把 id 压到 97px 并在连字符处折行（ISSUE-005）。
+   `text-overflow: ellipsis` 必须配 `overflow:hidden` + `min-width:0` 才生效 —— 只给前两个时
+   flex 项仍按内容撑开，看起来「没效果」。 */
 .drawer-id {
   font-weight: 600;
   font-family: var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* 状态 / 目标数 / 按钮组不吃压缩：宁可省略 id 也保住 `<1s` 和图标 */
+.drawer-status,
+.drawer-count,
+.drawer-badge,
+.drawer-tools {
+  flex-shrink: 0;
+}
+
+/* 回放态的时间戳：告诉人「这是历史，不是刚刚跑的」 */
+.drawer-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 2px 7px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* id 吃掉剩余空间；其它元素都不收缩（ISSUE-005 的老账，加元素时别忘了这条） */
+.drawer-id {
+  flex: 1 1 auto;
 }
 
 .drawer-status {
   font-size: 12.5px;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .drawer-status.run {
@@ -426,6 +683,8 @@ body {
   margin: 0;
   padding: 12px 14px max(18px, env(safe-area-inset-bottom));
   overflow: auto;
+  flex: 1;
+  min-height: 0;
   font-family: var(--mono);
   font-size: 12.5px;
   line-height: 1.55;
@@ -434,6 +693,76 @@ body {
   white-space: pre;
   tab-size: 2;
   -webkit-overflow-scrolling: touch;
+}
+
+/* ---------------- 多目标并列（P3） ---------------- */
+
+.panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.panes.multi {
+  grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr));
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 面板之间的分隔线：只在并列时出现 */
+.panes.multi .pane + .pane {
+  border-left: 1px solid var(--border);
+}
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 12px;
+}
+
+.pane-target {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-status {
+  margin-left: auto;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pane-status.run,
+.pane-status.ok {
+  color: var(--accent);
+}
+
+.pane-status.fail {
+  color: var(--danger);
+}
+
+.drawer-count {
+  font-size: 11.5px;
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 1px 6px;
+  white-space: nowrap;
 }
 
 /* 「自动换行」开关：断点优先落在分隔符之后，而不是任意字符处 */
@@ -494,6 +823,37 @@ body {
 @media (max-width: 640px) {
   .app {
     padding: 8px 12px 150px;
+  }
+
+  /* 手机上四列挤不下：时间戳已含日期，目标数与耗时可从详情里看 */
+  .run-row {
+    grid-template-columns: auto 1fr auto;
+  }
+
+  .run-meta {
+    display: none;
+  }
+
+  /* 390 宽放不下「id + 完整时间 + 状态 + 目标数 + 三个按钮」：
+     时间退成图标，id 与状态必须留着（悬停/长按仍有完整时间在 title 里） */
+  .badge-when {
+    display: none;
+  }
+
+  /* 手机放不下列，多目标改成上下堆叠 */
+  .panes.multi {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: minmax(0, auto);
+    overflow: auto;
+  }
+
+  .panes.multi .pane + .pane {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .panes.multi .drawer-body {
+    max-height: 26vh;
   }
 
   .topbar {
@@ -676,6 +1036,19 @@ body {
     border-top: 0;
     border-left: 2px solid var(--border);
     box-shadow: -8px 0 24px rgba(0, 0, 0, 0.08);
+  }
+
+  /* 多目标：面板要容纳并列的列，单列的 720 太窄。
+     1320 的来历：`ahk.bat instances` 单行实测 605px，双列要 605*2 + 28*2 + 4 ≈ 1266，取 1320 留余量。
+     1366 屏上等于 calc(100vw - 48px) = 1318（每块 631 > 605，不横滚）；1920 屏 1320。
+     三列（4~8 目标）物理上必然横滚：605*3 + 84 = 1899 > 1366。不要用降字号去凑——降到 11px 才够，
+     那时输出已经不能读了（ISSUE-006）。 */
+  .drawer.multi {
+    width: min(1320px, calc(100vw - 48px));
+  }
+
+  .card {
+    padding-right: 34px;
   }
 
   .drawer-head {

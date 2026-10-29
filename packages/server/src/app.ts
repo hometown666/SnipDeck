@@ -4,15 +4,20 @@ import { fileURLToPath } from 'node:url'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyStatic from '@fastify/static'
 import {
+  RunLog,
   SnippetStore,
   groupOf,
   loadHosts,
+  newRunId,
   renderTolerant,
   resolveTarget,
   resolveVars,
   runSnippet,
   type Hosts,
+  type HostTarget,
   type RunEvent,
+  type RunMeta,
+  type RunPaneResult,
   type Snippet,
 } from '@snipdeck/core'
 import { createDriver, ExecDriver } from '@snipdeck/drivers'
@@ -33,11 +38,51 @@ export type BuiltApp = {
   app: FastifyInstance
   store: SnippetStore
   hosts: Hosts
-  dirs: { data: string; snippets: string; tmp: string }
+  runs: RunLog
+  dirs: { data: string; snippets: string; tmp: string; runs: string }
 }
 
 function isLoopback(ip: string | undefined): boolean {
   return !ip || ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+}
+
+/** 一次 run 最多投几个目标：只是防呆，不是产品限制 */
+const MAX_TARGETS = 8
+
+/**
+ * 解析一次 run 的目标列表。
+ * 优先级：显式 `targets[]` > 单个 `target` > 片段自己的 `target` > hosts 的 default。
+ *
+ * **同一目标允许重复出现**——那正是 P3 的「同目标多开」：只有一台可执行机器时，
+ * 想并列跑两次只能这么表达。数组顺序 = 结果并列顺序。
+ */
+export function resolveTargets(
+  hosts: Hosts,
+  many: unknown,
+  single?: string,
+  fallback?: string,
+): { name: string; target: HostTarget }[] {
+  let names: (string | undefined)[]
+  if (many !== undefined) {
+    if (!Array.isArray(many)) throw new Error('targets 必须是数组')
+    if (many.length === 0) throw new Error('targets 不能是空数组')
+    if (many.length > MAX_TARGETS) throw new Error(`targets 最多 ${MAX_TARGETS} 个`)
+    for (const t of many) {
+      if (typeof t !== 'string' || !t.trim()) throw new Error('targets 的每一项都必须是非空字符串')
+    }
+    names = (many as string[]).map((t) => t.trim())
+  } else {
+    names = [single?.trim() || fallback]
+  }
+
+  return names.map((n) => {
+    // resolveTarget 对未知名字自己会抛「unknown target: x」
+    const r = resolveTarget(hosts, n)
+    if (r.target.reserved) {
+      throw new Error(`目标 ${r.name} 未激活（P5 预留，driver=${r.target.driver}）`)
+    }
+    return r
+  })
 }
 
 /**
@@ -50,6 +95,7 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
   const snippetsDir = resolve(dataDir, 'snippets')
   const hostsFile = resolve(dataDir, 'hosts.yaml')
   const tmpDir = resolve(dataDir, 'tmp')
+  const runsDir = resolve(dataDir, 'runs')
   const webDist = resolve(
     opts.webDist ?? resolve(REPO_ROOT, process.env.SNIPDECK_WEB_DIST ?? 'packages/web/dist'),
   )
@@ -59,6 +105,9 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
   const store = new SnippetStore(snippetsDir)
   store.watchDir()
   const hosts = loadHosts(hostsFile)
+  // 启动清一次：只按时间不够，调试期一天能跑出上百条，500 个文件上限兜底
+  const runs = new RunLog(runsDir, { maxFiles: 500, ttlDays: 30 })
+  runs.prune()
 
   app.addHook('onRequest', async (req, reply) => {
     if (!token || isLoopback(req.ip)) return
@@ -125,54 +174,144 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
     })),
   )
 
-  app.post<{ Body: { id: string; vars?: Record<string, string>; target?: string; confirm?: boolean } }>(
-    '/api/run',
-    async (req, reply) => {
-      const { id, vars, target: targetName, confirm } = req.body ?? {}
-      const snippet = store.get(id)
-      if (!snippet) return reply.code(404).send({ error: `snippet not found: ${id}` })
-      if (snippet.danger && !confirm) {
-        return reply.code(400).send({ error: 'danger snippet requires confirm: true' })
-      }
-      let target: ReturnType<typeof resolveTarget>
-      try {
-        target = resolveTarget(hosts, targetName ?? snippet.target)
-      } catch (e) {
-        // 目标不存在：在开流之前就能判定的错误，直接给 400
-        return reply.code(400).send({ error: e instanceof Error ? e.message : String(e) })
-      }
-      if (target.target.reserved) {
-        return reply.code(400).send({ error: `目标 ${target.name} 未激活（P5 预留，driver=${target.target.driver}）` })
-      }
+  app.post<{
+    Body: { id: string; vars?: Record<string, string>; target?: string; targets?: string[]; confirm?: boolean }
+  }>('/api/run', async (req, reply) => {
+    const { id, vars, target: single, targets: many, confirm } = req.body ?? {}
+    const snippet = store.get(id)
+    if (!snippet) return reply.code(404).send({ error: `snippet not found: ${id}` })
+    if (snippet.danger && !confirm) {
+      return reply.code(400).send({ error: 'danger snippet requires confirm: true' })
+    }
 
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache, no-transform',
-        Connection: 'keep-alive',
-        // 反向代理（tailscale serve / nginx）不要缓冲，否则事件会攒到最后一次性吐出
-        'X-Accel-Buffering': 'no',
-      })
-      const send = (ev: RunEvent) => {
-        reply.raw.write(`data: ${JSON.stringify(ev)}\n\n`)
+    let plan: { name: string; target: ReturnType<typeof resolveTarget>['target'] }[]
+    try {
+      plan = resolveTargets(hosts, many, single, snippet.target)
+    } catch (e) {
+      // 目标相关错误全部在**开流之前**判定：一旦 200 开了流，前端只能从事件里猜
+      return reply.code(400).send({ error: e instanceof Error ? e.message : String(e) })
+    }
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      // 反向代理（tailscale serve / nginx）不要缓冲，否则事件会攒到最后一次性吐出
+      'X-Accel-Buffering': 'no',
+    })
+    let closed = false
+    reply.raw.on('error', () => {
+      closed = true
+    })
+
+    // ——— 运行档案：断开 SSE 之后还能回看这次跑了什么 ———
+    // 记「实际生效的变量值」而不是前端传来的原样值：默认值也是参数的一部分，
+    // 而 secret 只留键名 + `***`（§5.4 的硬规矩：secret 不落历史）。
+    const resolvedVars = resolveVars(snippet, vars ?? {}).values
+    const recordedVars: Record<string, string> = {}
+    const varsRedacted: string[] = []
+    for (const [k, v] of Object.entries(resolvedVars)) {
+      if (snippet.vars?.[k]?.secret) {
+        recordedVars[k] = '***'
+        varsRedacted.push(k)
+      } else {
+        recordedVars[k] = v
       }
+    }
+    const runId = newRunId()
+    const runT0 = Date.now()
+    const meta: RunMeta = {
+      runId,
+      snippetId: snippet.id,
+      title: snippet.title,
+      targets: plan.map((p) => p.name),
+      startedAt: runT0,
+      caller: { ip: req.ip, ua: String(req.headers['user-agent'] ?? '') },
+      vars: recordedVars,
+      varsRedacted,
+    }
+    const writer = runs.begin(
+      meta,
+      Object.entries(resolvedVars)
+        .filter(([k]) => snippet.vars?.[k]?.secret)
+        .map(([, v]) => v),
+    )
+
+    // 每条事件都带 target / targetIndex：一条流里可能有 N 组结果，前端靠它分流
+    const send = (ev: RunEvent, name: string, index: number) => {
+      const tagged: RunEvent = { ...ev, target: name, targetIndex: index }
+      // 首条 start 带上 runId：前端据此知道「这条流对应哪份档案」，抽屉里可回链
+      if (tagged.type === 'start' && tagged.stepIndex === -1) tagged.runId = runId
+      // 先写盘再发流：客户端断开后事件仍要留档（§6.1：run 是服务端行为）
+      writer.event(tagged)
+      if (closed || reply.raw.writableEnded) return
       try {
-        const driver = createDriver(target.target, { tmpDir })
-        send({ type: 'start', stepIndex: -1, cmd: `[target ${target.name}]` })
-        for await (const ev of runSnippet(snippet, driver, {
-          vars,
-          defaultTimeout: Number(target.target.timeout ?? 20),
-          defaultShell:
-            typeof target.target.shell === 'string' ? target.target.shell : undefined,
-        })) {
-          send(ev)
-        }
-      } catch (e) {
-        send({ type: 'error', message: e instanceof Error ? e.message : String(e) })
-      } finally {
-        reply.raw.end()
+        reply.raw.write(`data: ${JSON.stringify(tagged)}\n\n`)
+      } catch {
+        closed = true
       }
-    },
-  )
+    }
+
+    // 每个目标的结局：由 exit / error 事件累积，最后写进 summary 行
+    const panes: RunPaneResult[] = plan.map(({ name }, index) => ({
+      target: name,
+      targetIndex: index,
+      ok: false,
+      note: '未执行',
+    }))
+
+    try {
+      // 同一目标多开 = 同一个 ExecDriver（按 bridgeRoot 缓存）→ 全局串行队列，
+      // 所以这里并发拉起 N 个 runSnippet 是安全的，实际执行仍严格一个接一个。
+      // P5 接入 ssh 后，这段不用改就是真并发了。
+      await Promise.all(
+        plan.map(async ({ name, target }, index) => {
+          try {
+            const driver = createDriver(target, { tmpDir })
+            for await (const ev of runSnippet(snippet, driver, {
+              vars,
+              defaultTimeout: Number(target.timeout ?? 20),
+              defaultShell: typeof target.shell === 'string' ? target.shell : undefined,
+            })) {
+              if (ev.type === 'exit') {
+                panes[index] = {
+                  target: name,
+                  targetIndex: index,
+                  ok: ev.ok,
+                  exitCode: ev.exitCode,
+                  durationMs: ev.durationMs,
+                  timedOut: ev.timedOut,
+                  note: ev.note,
+                }
+              } else if (ev.type === 'error') {
+                panes[index] = { target: name, targetIndex: index, ...panes[index], ok: false, note: ev.message }
+              }
+              send(ev, name, index)
+            }
+          } catch (e) {
+            const message = e instanceof Error ? e.message : String(e)
+            panes[index] = { target: name, targetIndex: index, ok: false, note: message }
+            send({ type: 'error', message }, name, index)
+          }
+        }),
+      )
+    } finally {
+      writer.summary({ ok: panes.every((p) => p.ok), durationMs: Date.now() - runT0, panes })
+      reply.raw.end()
+    }
+  })
+
+  app.get<{ Querystring: { limit?: string; snippet?: string } }>('/api/runs', async (req) => {
+    const raw = Number(req.query.limit ?? 20)
+    const limit = Math.min(100, Math.max(1, Number.isFinite(raw) ? Math.floor(raw) : 20))
+    return runs.list(limit, req.query.snippet)
+  })
+
+  app.get<{ Params: { runId: string } }>('/api/runs/:runId', async (req, reply) => {
+    const d = runs.read(req.params.runId)
+    if (!d) return reply.code(404).send({ error: `run 不存在: ${req.params.runId}` })
+    return d
+  })
 
   if (existsSync(webDist)) {
     app.register(fastifyStatic, { root: webDist })
@@ -192,7 +331,7 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
     })
   }
 
-  return { app, store, hosts, dirs: { data: dataDir, snippets: snippetsDir, tmp: tmpDir } }
+  return { app, store, hosts, runs, dirs: { data: dataDir, snippets: snippetsDir, tmp: tmpDir, runs: runsDir } }
 }
 
 function publicView(s: Snippet, snippetsDir: string) {

@@ -1,16 +1,48 @@
 import { type Dirent, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { parseExpectFrom } from './expect'
 import type { Snippet, Step, VarSpec } from './types'
 import { loadYamlDoc, saveYamlDoc } from './yaml'
 
 export type SnippetError = { file: string; error: string }
 
-function isStep(v: unknown): v is Step {
-  if (typeof v !== 'object' || v === null) return false
+/**
+ * 单个 step 的校验，返回错误描述（null = 合法）。
+ * 逐字段报错而不是一句 `invalid step`：片段是手写的 YAML，
+ * 「第 3 步的 expect 缺 match」比「steps 不合法」省半小时。
+ */
+function stepError(v: unknown, i: number): string | null {
+  if (typeof v !== 'object' || v === null) return `steps[${i}] 不是对象`
   const s = v as Record<string, unknown>
-  if (s.do === 'run') return typeof s.cmd === 'string'
-  if (s.do === 'sleep') return typeof s.ms === 'number'
-  return false
+  switch (s.do) {
+    case 'run':
+      return typeof s.cmd === 'string' && s.cmd.trim() ? null : `steps[${i}] run 缺 cmd`
+    case 'sleep':
+      return typeof s.ms === 'number' ? null : `steps[${i}] sleep 缺 ms（数字，毫秒）`
+    case 'expect': {
+      if (typeof s.match !== 'string' || s.match === '') {
+        return `steps[${i}] expect 缺 match（正则正文）`
+      }
+      if (s.flags !== undefined && typeof s.flags !== 'string') {
+        return `steps[${i}] expect.flags 必须是字符串`
+      }
+      if (s.from !== undefined && typeof s.from !== 'string') {
+        return `steps[${i}] expect.from 必须是字符串`
+      }
+      const src = parseExpectFrom(s.from as string | undefined)
+      if (src.kind === 'invalid') return `steps[${i}] ${src.error}`
+      try {
+        // 用 flags 一并编译，才能抓出 `(?<` 之类只在带 flag 时非法的情况
+        // eslint-disable-next-line no-new
+        new RegExp(s.match, typeof s.flags === 'string' ? s.flags : undefined)
+      } catch (e) {
+        return `steps[${i}] expect.match 正则无效: ${e instanceof Error ? e.message : String(e)}`
+      }
+      return null
+    }
+    default:
+      return `steps[${i}] 未知的 do: ${JSON.stringify(s.do)}（可用 run | sleep | expect）`
+  }
 }
 
 export function validateSnippet(data: unknown): string[] {
@@ -19,7 +51,12 @@ export function validateSnippet(data: unknown): string[] {
   const d = data as Record<string, unknown>
   if (typeof d.id !== 'string' || !d.id) errs.push('missing id')
   if (!Array.isArray(d.steps) || d.steps.length === 0) errs.push('missing steps')
-  else if (!d.steps.every(isStep)) errs.push('invalid step (do: run|sleep)')
+  else {
+    d.steps.forEach((s, i) => {
+      const e = stepError(s, i)
+      if (e) errs.push(e)
+    })
+  }
   if (d.vars !== undefined && (typeof d.vars !== 'object' || d.vars === null)) {
     errs.push('vars must be a mapping')
   }

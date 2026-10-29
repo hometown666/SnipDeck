@@ -4,7 +4,7 @@
  *
  * 运行：npm run smoke（在 packages/server 下）
  */
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -128,6 +128,19 @@ writeFixture(
     '',
   ].join('\n'),
 )
+// 「同目标多开」的串行验证用：约 2s、走队列、**不打桥**（listener 离线也能跑），
+// 有 stdout 才能断言两个目标的事件区间不重叠。
+writeFixture(
+  'snippets/测试/slow-queued.yaml',
+  [
+    'id: slow-queued',
+    'title: 慢命令',
+    'target: win-desktop',
+    'steps:',
+    "  - { do: run, cmd: 'ping -n 3 127.0.0.1', timeout: 30 }",
+    '',
+  ].join('\n'),
+)
 
 const { app, store } = buildApp({
   dataDir: FIXTURE,
@@ -200,7 +213,7 @@ const hb = h.json()
 check('GET /api/health → 200', h.statusCode === 200)
 check('health.ok === true', hb.ok === true)
 check('health.bridgeUp 是布尔值', typeof hb.bridgeUp === 'boolean', JSON.stringify(hb))
-check('health.snippets = 5（6 条里 1 条重复）', hb.snippets === 5, JSON.stringify(hb))
+check('health.snippets = 6（7 条里 1 条重复）', hb.snippets === 6, JSON.stringify(hb))
 check('health.quarantined = 1', hb.quarantined === 1, JSON.stringify(hb))
 
 // 3. 列表与单个
@@ -277,6 +290,140 @@ const reservedTarget = await app.inject({
   payload: { id: 'kill-demo', confirm: true, target: 'vps' },
 })
 check('reserved 目标 → 400', reservedTarget.statusCode === 400, String(reservedTarget.statusCode))
+
+// 8b. 多目标（P3）：targets[] 校验在开流前判定
+const targetsBad: [string, unknown][] = [
+  ['空数组', []],
+  ['未知目标', ['nope']],
+  ['含 reserved 目标（整条拒绝）', ['win-desktop', 'vps']],
+  ['非数组', 'win-desktop'],
+  ['空字符串项', ['win-desktop', '  ']],
+]
+for (const [label, targets] of targetsBad) {
+  const r = await app.inject({
+    method: 'POST',
+    url: '/api/run',
+    headers: auth,
+    payload: { id: 'slow-queued', targets },
+  })
+  check(`targets ${label} → 400`, r.statusCode === 400, `${r.statusCode} ${r.body.slice(0, 120)}`)
+}
+
+function parseEvents(body: string): Record<string, unknown>[] {
+  return body
+    .split('\n\n')
+    .filter((c) => c.startsWith('data: '))
+    .map((c) => JSON.parse(c.slice(6)) as Record<string, unknown>)
+}
+
+// 同一目标开两次：事件要带 target/targetIndex，且两次执行必须**严格串行**
+// （桥的 command.txt 是单车道；这条片段不打桥，所以 listener 离线也能验）
+const multiT0 = Date.now()
+const multi = await app.inject({
+  method: 'POST',
+  url: '/api/run',
+  headers: auth,
+  payload: { id: 'slow-queued', targets: ['win-desktop', 'win-desktop'] },
+})
+const multiWall = Date.now() - multiT0
+const evs = parseEvents(multi.body)
+check('多目标 run → 200 + event-stream', multi.statusCode === 200 && evs.length > 0, String(multi.statusCode))
+check('每条事件都带 target', evs.every((e) => e.target === 'win-desktop'), JSON.stringify(evs.slice(0, 2)))
+check(
+  'targetIndex 覆盖 0 与 1（同目标多开）',
+  [...new Set(evs.map((e) => e.targetIndex))].sort().join(',') === '0,1',
+  JSON.stringify([...new Set(evs.map((e) => e.targetIndex))]),
+)
+check(
+  '两个目标各自收尾',
+  [0, 1].every((t) =>
+    evs.some((e) => e.targetIndex === t && e.type === 'exit' && e.ok === true),
+  ),
+  JSON.stringify(evs.filter((e) => e.type === 'exit')),
+)
+// 串行判定：两组的「stdout/step 事件区间」不能重叠
+const span = (t: number) => {
+  const idx = evs
+    .map((e, i) => ({ e, i }))
+    .filter(({ e }) => e.targetIndex === t && (e.type === 'stdout' || e.type === 'step'))
+    .map(({ i }) => i)
+  return idx.length === 0 ? null : [Math.min(...idx), Math.max(...idx)]
+}
+const sp0 = span(0)
+const sp1 = span(1)
+check(
+  '同目标多开严格串行（区间不重叠）',
+  !!sp0 && !!sp1 && (sp0[1]! < sp1[0]! || sp1[1]! < sp0[0]!),
+  `span0=${JSON.stringify(sp0)} span1=${JSON.stringify(sp1)}`,
+)
+// ping -n 3 约 2s，两条串行应 ≥ 3.5s（并行会接近 2s）
+check('多目标总耗时 ≈ 单条 × 2（确实没并发）', multiWall >= 3500, `${multiWall}ms`)
+
+// 8c. 运行档案（P4）：断开 SSE 之后还能回看这次跑了什么
+// 先跑一条带 secret 的片段，用来验「secret 值不进档案」
+await app.inject({ method: 'POST', url: '/api/run', headers: auth, payload: { id: 'secret-demo' } })
+
+type RunItem = {
+  runId: string
+  snippetId: string
+  targets: string[]
+  vars?: Record<string, string>
+  varsRedacted?: string[]
+  ok: boolean
+  durationMs?: number
+  panes: { target: string; ok: boolean }[]
+  eventCount: number
+}
+const runsList = (
+  await app.inject({ method: 'GET', url: '/api/runs?limit=10', headers: auth })
+).json() as RunItem[]
+check('GET /api/runs → 非空数组', Array.isArray(runsList) && runsList.length > 0, JSON.stringify(runsList).slice(0, 200))
+
+const multiRun = runsList.find((r) => r.snippetId === 'slow-queued')
+check('多目标 run 已落盘', multiRun !== undefined, JSON.stringify(runsList.map((r) => r.snippetId)))
+check(
+  '档案记了 2 个目标 + 2 条目标结论',
+  multiRun?.targets.length === 2 && multiRun?.panes.length === 2,
+  JSON.stringify(multiRun?.targets),
+)
+check(
+  '列表带 ok / durationMs / eventCount',
+  typeof multiRun?.ok === 'boolean' && (multiRun?.durationMs ?? 0) > 0 && (multiRun?.eventCount ?? 0) > 0,
+  JSON.stringify({ ok: multiRun?.ok, dur: multiRun?.durationMs, n: multiRun?.eventCount }),
+)
+
+const detail = (
+  await app.inject({ method: 'GET', url: `/api/runs/${multiRun?.runId}`, headers: auth })
+).json() as {
+  meta: { runId: string; snippetId: string }
+  events: Record<string, unknown>[]
+  summary: { ok: boolean; panes: unknown[] }
+}
+check('GET /api/runs/:runId → meta + events + summary', detail.meta.runId === multiRun?.runId && detail.events.length > 0 && !!detail.summary, JSON.stringify(Object.keys(detail)))
+check('详情事件数与列表一致', detail.events.length === multiRun?.eventCount, `${detail.events.length} vs ${multiRun?.eventCount}`)
+check(
+  'start 事件带 runId（前端据此回链档案）',
+  detail.events.find((e) => e.type === 'start')?.runId === multiRun?.runId,
+  JSON.stringify(detail.events[0]),
+)
+check('档案末条事件是 exit（顺序保真）', detail.events.at(-1)?.type === 'exit', String(detail.events.at(-1)?.type))
+
+const secretRuns = (
+  await app.inject({ method: 'GET', url: '/api/runs?snippet=secret-demo', headers: auth })
+).json() as RunItem[]
+const secretRun = secretRuns[0]
+check('按 snippet 过滤可用', secretRun?.snippetId === 'secret-demo', JSON.stringify(secretRuns.map((r) => r.snippetId)))
+const rawRunFile = readFileSync(join(FIXTURE, 'runs', `${secretRun?.runId}.jsonl`), 'utf8')
+check(
+  'secret 的实际值没有落盘（命令回显 + 输出都抹掉）',
+  !rawRunFile.includes('s3cr3t-value'),
+  rawRunFile.slice(0, 240),
+)
+check('meta.vars 里 secret 打码', secretRun?.vars?.token === '***', JSON.stringify(secretRun?.vars))
+check('varsRedacted 记下 token', secretRun?.varsRedacted?.includes('token') === true, JSON.stringify(secretRun?.varsRedacted))
+
+const badRunId = await app.inject({ method: 'GET', url: '/api/runs/..%2Fhosts', headers: auth })
+check('非法 runId → 404（不能读穿目录）', badRunId.statusCode === 404, String(badRunId.statusCode))
 
 // 9. 真跑一条（SSE 事件流；inject 会等到 reply 结束）
 const bridgeUp = hb.bridgeUp === true

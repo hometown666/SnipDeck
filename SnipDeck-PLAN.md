@@ -2,7 +2,7 @@
 
 > 一句话：自托管的「片段库 + 跨设备执行」工作台。把 Termius 的壳、你自己的纯文本片段库、以及家里那套 AHK 文件桥，缝成一个东西。
 >
-> 文档状态：v0.8 · 2026-10-25  
+> 文档状态：v1.5 · 2026-10-30  
 > 代号可改：`SnipDeck` / 中文「片段坞」。备选：`SnipDock`、`TextDeck`、`TxtCtl`。
 
 ---
@@ -45,7 +45,7 @@ P0 落地代码经通读 + 实跑（typecheck、smoke 19 项、CLI 真实调桥 
 | P0 要的「计划任务方式起服务」没有脚本 | 验收项无从执行 | 补 `scripts/start-server.ps1` + `install-autostart.ps1`（登录时任务、读 `.env`、日志落盘） |
 | PowerShell 重定向把中文日志转成乱码 | 日志里出现 `璇曠偧涔嬪湴` | 追加交给 `cmd`，不让 PowerShell 二次转码 |
 
-**已知缺口（按 §9 排期，不在本轮）**：`runs/<runId>.jsonl` 落盘（P4）；片段 CRUD / Raw 编辑 API（P4）；`targets[]` 多目标（P3）；跨机并列（P5，需 ssh 驱动）；token 靠手填 localStorage、配对二维码未做（§12-2）。service worker 与离线缓存已在 P2 落地，但只在 HTTPS 下生效。
+**已知缺口（按 §9 排期，不在本轮）**：片段 CRUD / Raw 编辑 API（表单与原文编辑仍是 P5 之后）；跨机并列（P5，需 ssh 驱动；`targets[]` 数据结构与 UI 已在 P3 落地）；token 靠手填 localStorage、配对二维码未做（§12-2）。service worker 与离线缓存已在 P2 落地，但只在 HTTPS 下生效。~~`runs/<runId>.jsonl` 落盘、`expect` 条件步、从 shell 历史导入~~ **P4 已全部落地**（见 §22）。
 
 ### 0.2 待修项 ISSUE-001：token 守卫把首屏也挡了，手机端死锁（2026-10-25 实测，**已修 · 2026-10-29**）
 
@@ -325,6 +325,282 @@ search(q: string): Snippet[] {
 
 ---
 
+### 0.5 待修缺口 ISSUE-005 ~ 008（2026-10-29 P2.5/P3 复验，**四条全部已修 · 2026-10-29**）
+
+复验口径：`npm test` 46/46 + `npm run ui:multi` 20 条断言全过；下面四条都是断言没覆盖到的地方，用 CDP 补测出来的。所有数据均为 `Emulation.setDeviceMetricsOverride` 真仿真（非窗口缩放），服务 `127.0.0.1:7878`、listener 在线。
+
+> **撤回一条误报**：上一轮报告里的「`/` 快捷键在 ≤1023 失效」不成立。当时用 `document.querySelector('[data-search]')` 手写模拟，命中了左栏里 `display:none` 的那个；实际代码 `App.tsx:261–289` 用的是 `querySelectorAll(...).find(el => el.offsetParent !== null)`。用 CDP `Input.dispatchKeyEvent` 发真实按键复测：390 与 768 聚焦到 `.searchbar` 输入框（placeholder「搜索片段（id / 标题 / 分组 / 标签）…」）、1366 聚焦到 `.sidebar` 输入框（「搜索（/）」），三档全部正确。**这条不要修，也不要再入库。**
+
+#### ISSUE-005：手机多目标时抽屉头部折成两行（视觉）—— **已修 · 2026-10-29**
+
+**现场**：390×844，⊕ 连点一次跑双目标：
+
+| 元素 | 尺寸 | 文本行数 |
+|---|---|---|
+| `.drawer-id`（`check-instence`） | 97×42 | **2**（`check-` / `instence`） |
+| `.drawer-status`（`2/2 成功 · 49ms`） | 77×38 | **2** |
+| `.drawer-head` | 高 63 | 对照：390 单目标 55、桌面 48 |
+
+截图 `data/tmp/ui-multi-390.png` 可直接看到 `check-` / `instence` 断开。
+
+**根因**：`.drawer-head` 是 `display:flex`（`styles.css:521`），`.drawer-id`（`:530–533`）与 `.drawer-status`（`:535–539`）既没 `white-space:nowrap` 也没 `min-width:0`/`flex-shrink:0`。四个子元素（id / status / `2 目标` 徽章 / 三个图标）在 390 宽下溢出，flex 默认收缩把 id 压到 97px，文本就在连字符处折行。桌面 720 宽不触发，所以 CDP 桌面验收看不出来。
+
+**影响**：只在「手机 + 多目标」出现；头部高度抖动 8px，标题被切成两段读着别扭。
+
+**修复方向**（三行 CSS）：
+
+```css
+.drawer-id { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.drawer-status, .drawer-count, .drawer-tools { flex-shrink: 0; }
+```
+
+让 `<1s` 与目标数永远单行，id 优先让位（省略号），而不是整块换行。
+
+**回归用例**：390 双目标下断言 `.drawer-id` 的 Range 文本行数 === 1、`.drawer-head` 高度 ≤ 50、`idText` 仍以 `check-` 开头（省略号只截显示，不改文本）。
+
+#### ISSUE-006：并列两列时输出右侧被切 56px（阅读体验）—— **已修 · 2026-10-29**
+
+**现场**（1366×768，双目标 `check-instence`）：
+
+| | 抽屉宽 | 每块 pane `.drawer-body` |
+|---|---|---|
+| 双目标 | 1100 | `clientWidth 549` / `scrollWidth 605` → **每行右侧切 56px** |
+| 单目标（1920） | 720 | `718 / 718` → 不切 |
+
+被切掉的正是行尾：`…WorkBuddy.exe\|workbuddy\|2026-10-29 18:35:` 之后的时间秒数与末尾竖线看不到，必须各自横向滚动。截图 `data/tmp/ui-multi-1366.png` 里两块 pane 底部各有一条横向滚动条。
+
+**根因**：多目标抽屉宽 `min(1100px, 88vw)`（`styles.css:904`），双列时每块 `1100/2 - 14*2 padding ≈ 549`；而 `ahk.bat instances` 的单行在 13.5px 等宽下实测 605px。**差 56px ≈ 7 个半角字符**，正好是时间戳尾巴。
+
+**影响**：并列的核心价值是「一眼对比两份结果」，但两份都看不全行尾时，对比退化成「两边一起滚」。
+
+**修复方向**（先动布局、别动字号）：
+
+抽屉宽度按内容需求给足 —— 双列要 `605*2 + 28*2 + 4 ≈ 1266`，取整 1320：
+
+```css
+.drawer.multi { width: min(1320px, calc(100vw - 48px)); }
+```
+
+- 1366 → `calc(100vw - 48px)` = 1318，每块 631 > 605 ✓
+- 1920 → `min(1320, 1872)` = 1320，每块 632 > 605 ✓
+- 三列是物理上限：`605*3 + 84 = 1899 > 1366`，**3 列必然横滚**，这条写进已知缺口，不要试图用降字号掩盖（要降到 ~11px 才够，那就不能读了）。
+
+备选（不推荐）：`.panes.multi .drawer-body { font-size: 12px }` 能省 11%，但 1920 大屏上 12px 输出偏小，且与单目标态不一致。
+
+**回归用例**：1366 与 1920 双目标跑 `check-instence`，断言每块 `.drawer-body` 的 `scrollWidth <= clientWidth`（即无横向滚动）；同时断言页面 `scrollWidth <= innerWidth`（别为了放宽抽屉把整页撑出横向滚动条）；390 仍堆叠单列且抽屉宽 390。
+
+#### ISSUE-007：超过 8 个目标时不拦截，且错误裸露 JSON（体验崩）—— **已修 · 2026-10-29**
+
+**现场**：1366，⊕ 打开后连点 `win-desktop` 8 次（预选 1 + 点击 8 = 9 个 chip），点执行：
+
+```
+chips: 9
+抽屉: 打开
+panes: 9
+状态: 0/9 成功 · 0ms
+每块 pane 内容: ! ERROR ApiError: {"error":"targets 最多 8 个"}
+```
+
+一个都没跑，却开了 9 块空面板、把同一句错误重复 9 遍、状态栏还写成「0/9 成功」。
+
+**根因**（两处，互相独立）：
+
+1. **前端不设防**：`App.tsx:651–661` 的 `target-btn` 只 `disabled={h.reserved}`，没有数量上限；`submitDraft()`（`:392–406`）只校验「至少一个目标」和必填变量。服务端 `MAX_TARGETS = 8`（`app.ts:45`）是唯一闸门。
+2. **错误串是 HTTP 正文原文**：`api.ts:104` 是 `throw new ApiError(r.status, await r.text())` —— `message` 直接等于 `{"error":"targets 最多 8 个"}` 这段 JSON，前端 `String(e)` 又加前缀 `ApiError: `。**所有 400 都这样**（danger 未确认、未知目标、空数组、vars 非对象），不只是目标数。
+3. 抽屉先开开关：`doRun`（`:345–355`）在 `await api.run(...)` 之前就 `setOutput(...)`，所以请求被拒时 9 块 pane 已经渲染出来了，catch 只能往每块里塞错误行。
+
+**影响**：用户唯一能撞到的高频 400 就是「点多了一个目标」，而现在的表现像程序坏了。
+
+**修复方向**（三条都做，改动都不大）：
+
+1. `api.ts` 加一个 `parseError(status, text)`：先 `JSON.parse`，取 `.error` 作 message，解析失败退回 `text.slice(0, 200)`。`ApiError` 顺带留 `detail` 字段（原始文本）供调试。注意 `req()` 与 `api.run` 两处都要走它。
+2. 前端在 `draft.targets.length >= 8` 时把 `target-btn` 变 `disabled`，并给 chips 区一句 `最多 8 个目标` 的 hint；常量与 `app.ts:45` 的 `MAX_TARGETS` 对齐（能由 `/api/hosts` 带出来更好，但先硬编码 + 注释指回服务端）。
+3. 让 400 回到表单里，而不是开抽屉：`api.run` 加 `onStart` 回调（`fetch` 返回 `r.ok` 后立刻调一次），`doRun` 把 `setOutput` 挪进 `onStart`；catch 里 `status === 400` 且还没 `onStart` 时 `setFormError(message)` 并保留 draft。
+
+**回归用例**：CDP 连点 9 次 → 第 9 个按钮 `disabled`；即便绕过 UI 直接打 API 9 目标，前端应显示表单内错误、`.drawer` 不存在、`.form-error` 文案不含 `{"error"` 与 `ApiError` 字样。另加一条冒烟：`POST /api/run` 带 9 目标 → 400 且 `body.error` 是纯文本句子。
+
+#### ISSUE-008：桌面多开入口是「看不见但点得到」的热区（可达性）—— **已修 · 2026-10-29**
+
+**现场**（1366，鼠标未悬停卡片）：
+
+| 属性 | 值 |
+|---|---|
+| `opacity` | **0** |
+| `pointer-events` | **auto** |
+| 尺寸 | 22×22（卡片右上角，距边 6px） |
+| `tabIndex` | **-1** |
+| `aria-label` | **无**（只有 `role="button"` + `title`） |
+
+`styles.css:203–211` 只在 `@media (hover: hover)` 里把 `opacity` 降到 0，**没关掉命中测试**。鼠标移到 22×22 区域时它会自动亮到 0.7（`.card-fan:hover`），所以「看不见」只在鼠标不在上面时成立 —— 但对触摸屏笔记本、以及「手快先按下」的场景，这 22×22 是个静默吃掉点击的坑：点它不会执行片段，而是弹目标选择器。
+
+**影响**：误触概率不高（悬停会显形），但两个真实问题：① 隐形容器吃点击；② 键盘/读屏用户完全无法使用多开（`tabIndex=-1`、无 `aria-label`）。
+
+**修复方向**：
+
+1. 隐形时也关掉命中测试，显形再放行：
+   ```css
+   @media (hover: hover) {
+     .card-fan { opacity: 0; pointer-events: none; }
+     .card:hover .card-fan, .card:focus-within .card-fan { opacity: .7; pointer-events: auto; }
+   }
+   ```
+   `@media (hover: none)`（触屏）保持常显，现状不动。
+2. 键盘入口另开一条，别把 `<span role=button>` 塞进 `<button class=card>` 里抢 Tab（嵌套交互控件对读屏不友好）：选中卡片时按 `T` 打开目标选择器，与 `Enter`（执行）并列，提示写进左栏 `.nav-hint`。
+3. `aria-label="选择执行目标"` 补上，`title` 保留。
+
+**回归用例**：1366 未悬停时点卡片右上角 → 应走「执行/表单」路径而不是目标选择器（断言 `.target-btn` 不出现）；悬停后同一坐标点击 → 目标选择器出现；390（`hover: none`）未操作时 `.card-fan` 的 `opacity >= 0.7`；键盘 `T` 能打开选择器。
+
+---
+
+### 0.6 修复计划（2026-10-29，**四条全部已修 · 2026-10-29**）
+
+四条全在前端（`styles.css` / `App.tsx` / `api.ts`），服务端只在 ISSUE-007 有一条可选改动。按「先摘确定性的疤 → 再碰结构 → 最后做要拍板的」排序。
+
+| 序 | Issue | 性质 | 改动面 | 验收 | 状态 |
+|---|---|---|---|---|---|
+| 1 | ISSUE-005 | 视觉（手机多目标） | `styles.css` 3 行 | 390 双目标头部 1 行、高 ≤56 | **已修 10-29** |
+| 2 | ISSUE-007 | 体验崩 + 错误呈现 | `api.ts` 1 函数 + `App.tsx` 3 处 | 9 目标只出表单错误、无抽屉 | **已修 10-29** |
+| 3 | ISSUE-006 | 阅读体验（并列） | `styles.css:904` 1 行 + 两档实测 | 双目标 pane 无横向滚动 | **已修 10-29** |
+| 4 | ISSUE-008 | 可达性 | `styles.css` hover 块 + 键盘入口 | 未悬停点不中 ⊕；`T` 可开 | **已修 10-29** |
+
+先做 005 的理由：三行 CSS、无逻辑、当场能验，而且是每天都会看到的疤。007 排第二：影响面最大（**所有** 400 都裸 JSON），但动 `api.ts` 的错误路径与 `doRun` 的时序，要先想清楚再下笔。006 排第三：一条宽度规则，但要在 1366 / 1920 两档实测，还要接受「三列必然横滚」这个物理事实。008 排最后：不改也能用，且「`T` 键 vs 让 `⊕` 进 Tab 序列」是个交互口味问题，值得单独拍。
+
+**落地**（四条一起做完，回归并进 `npm run ui:multi`：20 → **49 项断言**，全过）
+
+| Issue | 落地要点 | 与计划的偏差 |
+|---|---|---|
+| 005 | `.drawer-id` 加 `nowrap + overflow:hidden + ellipsis + min-width:0`；`.drawer-status / .drawer-count / .drawer-tools` 加 `flex-shrink:0` | 头部高度阈值从「≤50」改「手机 ≤56 / 桌面 ≤50」——手机图标按钮本身 34px + 上下 padding，55 才是单行的正常高度（折行时是 63） |
+| 006 | `.drawer.multi { width: min(1320px, calc(100vw - 48px)) }` | 无。1366 抽屉 1318、1920 抽屉 1320，两块 pane 均 `scrollWidth <= clientWidth` |
+| 007 | `api.ts` 新增 `parseError()`（取 `.error`，非 JSON 退原文前 200 字）+ `ApiError.detail`；`api.run` 新增 `onStart`；`App.tsx` 常量 `MAX_TARGETS=8` + 按钮 disabled + `onClick` 二次判断 + `field-note` 提示 + 提交前拦截 + `doRun` 把 `setOutput` 挪进 `onStart`、400 回填 draft | 多改了一处：`doRun` 新增 `fromDraft` 参数，被拒时把整份 draft（含变量与目标）原样回填，而不只是报错 |
+| 008 | `@media (hover:hover)` 里隐形态加 `pointer-events:none`，显形挂 `.card:hover / :focus-within`；`aria-label="选择执行目标"`；快捷键 `T`（无修饰键、非输入态、无弹窗时）+ 左栏 `.nav-hint` 补文案 | 无 |
+
+**量出来的两个反直觉点**：
+
+1. 「行数」不能用 `Range.getClientRects().length` 数——被 `text-overflow:ellipsis` 截断时 Chrome 会返回「可见段 + 被裁段」两个矩形，`top` 相同却是单行。要数**不同 top 的个数**。第一版断言就是这么假红的。
+2) 007 的「400 回表单」从 UI **不可达**（第 9 个按钮已 disabled），所以回归脚本用 `page.evaluate` 把 `window.fetch` 对 `/api/run` 桩成 400，再走真实提交流程——断言 `.drawer` 不存在、`.form-error` 恰好是 `targets 最多 8 个`、无 `{"error"` 与 `ApiError` 前缀。
+
+#### 计划 1 · ISSUE-005（抽屉头部不许换行）
+
+**改哪**：`packages/web/src/styles.css`，`.drawer-id`（:530–533）与 `.drawer-status`（:535–539）附近。
+
+**怎么改**：
+
+```css
+.drawer-id {
+  font-weight: 600;
+  font-family: var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;          /* 允许被压缩，配合 ellipsis 而不是折行 */
+}
+
+.drawer-status,
+.drawer-count,
+.drawer-tools {
+  flex-shrink: 0;        /* 状态、目标数、按钮组不吃压缩 */
+}
+```
+
+**怎么验**：390×844 双目标 → `.drawer-id` 用 `Range` 数文本行数 === 1；`.drawer-head` 高度 ≤ 50；`idText` 仍是完整 `check-instence`（省略号只截视觉）。顺带量一次 390 单目标（现 55px）：头部只比桌面 48px 高 7px，属 padding 差异，改完不应变化——若也降了，说明单目标本来就有一处隐性折行，记下来。
+
+**坑**：`text-overflow: ellipsis` 要 `overflow: hidden` + `min-width: 0` 同时在场才生效——只加前两个、flex 项不给 `min-width:0` 时浏览器仍按内容撑开，看起来「没效果」。
+
+#### 计划 2 · ISSUE-007（错误要说人话，上限要当场拦）
+
+**改哪**：`packages/web/src/api.ts`（:104 与 `run` 的 `if (!r.ok)` 分支）、`packages/web/src/App.tsx`（`:345` `doRun` 开头、`:392` `submitDraft`、`:651` `target-btn`）。
+
+**怎么改**（三条独立的，按这个顺序落地）：
+
+1. **解析错误体**（`api.ts`）：
+   ```ts
+   function parseError(status: number, text: string): ApiError {
+     let message = text.slice(0, 200)
+     try { const j = JSON.parse(text); if (j && typeof j.error === 'string') message = j.error } catch { /* 不是 JSON 就用原文 */ }
+     return new ApiError(status, message, text)
+   }
+   ```
+   `ApiError` 加第三参 `detail`（原始文本，只给 console/debug 看）。`req()` 与 `api.run()` 两处都改成调它。
+
+2. **前端拦住第 9 个**（`App.tsx`）：
+   - 常量 `const MAX_TARGETS = 8 // 与 packages/server/src/app.ts 的 MAX_TARGETS 对齐`
+   - `target-btn` 的 `disabled` 加 `|| draft.targets.length >= MAX_TARGETS`
+   - chips 区在满额时显示一句 `最多 8 个目标`
+
+3. **400 别开抽屉**（`api.ts` + `App.tsx`）：
+   - `api.run(id, vars, confirmed, targets, onEvent, onStart?)`：`fetch` 后 `if (!r.ok) throw parseError(...)`，`r.ok` 为真时先 `onStart?.()`，再进读流循环。
+   - `doRun` 把 `setOutput(...)` 从函数开头挪进 `onStart`；`catch` 里若 `e instanceof ApiError && e.status === 400` 且 draft 快照还在 → `setDraft(snapshot)` + `setFormError(e.message)`，**不建 pane、不开抽屉**。
+   - 快照怎么传：`doRun` 增一个 `fromDraft?: Draft` 参数，`submitDraft` 传入，catch 里回填。
+
+**怎么验**：
+- CDP 连点 8 次 → 第 9 个按钮 `disabled=true`，chips 仍 8 个。
+- 绕过 UI 直接打 API 9 目标（`page.evaluate` 调 `api.run`）→ `.drawer` 不存在、`.modal .form-error` 文案等于「targets 最多 8 个」、不含 `{"error"` 与 `ApiError`。
+- 冒烟补一条：9 目标 → 400 且 `body.error` 是纯句子（这已经是现状，钉住即可）。
+
+**坑**：
+- `setOutput` 挪位置后，「运行中」的计时起点会晚一个 RTT（几十 ms）——可接受，但要顺手确认 `startedAt` 也一起搬，否则计时会算进网络延迟。
+- `danger` 片段二次确认 + 400 同时发生时，draft 快照可能为 `null`（确认弹窗路径）——回填逻辑要允许 `null`，只做 `setFormError`。
+
+#### 计划 3 · ISSUE-006（并列时把抽屉给够宽）
+
+**改哪**：`packages/web/src/styles.css:904` `.drawer.multi` 的宽度。
+
+**怎么改**：
+
+```css
+.drawer.multi {
+  width: min(1320px, calc(100vw - 48px));
+}
+```
+
+依据：双列要放下一行 605px 的输出 → `605*2 + 14*2*2 + 4 = 1266`，取 1320 留余量。1366 上等于 1318（每块 631）、1920 上 1320（每块 632），都不再横滚。
+
+**怎么验**：1366 与 1920 双目标 `check-instence` → 每块 `.drawer-body` 的 `scrollWidth <= clientWidth`；页面 `scrollWidth <= innerWidth`（放宽抽屉不能把整页撑出横向滚动）；390 仍是单列 390 宽、抽屉贴底。
+
+**坑 / 要接受的**：三列（4~8 目标）必然横滚——`605*3 + 84 = 1899`，1366 屏物理放不下。**不要用降字号去凑**：降到 11px 才够，那时输出已经不能读了。把「3 列 + 长行 = 横滚」写进 §21 已知缺口，并在 `--cols >= 3` 时给 pane 头部一个「⤢」提示？——不做，够用了。
+
+#### 计划 4 · ISSUE-008（多开入口：要么能看见，要么点不到）
+
+**改哪**：`packages/web/src/styles.css:203–211` 的 `@media (hover: hover)` 块；`App.tsx` 卡片与快捷键两处（若要键盘入口）。
+
+**怎么改**：
+
+1. 隐形时关命中测试，显形再放行：
+   ```css
+   @media (hover: hover) {
+     .card-fan { opacity: 0; pointer-events: none; }
+     .card:hover .card-fan,
+     .card:focus-within .card-fan { opacity: .7; pointer-events: auto; }
+   }
+   ```
+   `@media (hover: none)`（手机/平板触摸）现状已是常显，不动。
+2. 键盘入口：`App.tsx` 的 keydown（:286 附近，`/` 那条旁边）加 `if (e.key === 't' && !typing && flat[active]) openSnippet(flat[active]!, false, true)`，左栏 `.nav-hint` 补「T 选目标」。
+3. 补 `aria-label="选择执行目标"`；`title` 保留。
+
+**怎么验**：1366 未悬停，用 `Input.dispatchMouseEvent` 点卡片右上角 (right-6-11, top+17) → 断言 `.target-btn` **不**出现、走的是执行路径；悬停同一坐标再点 → 选择器出现；390 未悬停读 `getComputedStyle('.card-fan').opacity >= 0.7`；键盘 `T` 在选择卡片后能开选择器。
+
+**坑**：`pointer-events: none` 时 `.card-fan:hover` 永不触发（没有命中就没有 hover），所以显形必须挂在 `.card:hover` 上，不能只靠自身 hover —— 现在的 CSS 两者都有，改完只留 `.card:hover` 那条才有意义。
+
+#### 文档同步清单
+
+**本轮已做**（只登记，不涉及代码）：
+
+- §9 路线图 P2.5 / P3 行已标「复验遗留 ISSUE-00x 见 §0.5，修完再标『稳定』」。
+- §20 已知缺口末尾已挂 §0.5 指针；§21 已知缺口已补「两列右裁 56px / 三列必然横滚」与「超 8 目标不拦」两条。
+
+**修完后已同步（2026-10-29）**：
+
+- §9：P2.5 与 P3 两行从「复验遗留…」改为「**已稳定**」，并写明回归入口 `npm run ui:multi`。
+- §21：两列右裁那条划线标已修（附新宽度与「1366 每块 631 > 605」的算式），「三列必然横滚」保留为取舍。
+- `scripts/check-multi-target.mjs`：断言 20 → 49，新增 005（id 单行 / 头部高度，手机档阈值 56）、006（两档 pane 无横滚，1920 也跑一趟）、007（8 上限 / 满额 disabled / `field-note` / 桩 400 的呈现）、008（未悬停不可点 / 悬停显形 / `T` 键 / 触屏常显）。**注意**：脚本里「行数」用不同 `top` 计数，不是 `getClientRects().length`（ellipsis 会给两个矩形）。
+
+**还没做（留给下一轮）**：
+
+- §20 验收表补「多目标 / 手机」一列（现在只有 1920 / 1366 / 390 单目标），并把「中英混排仍对不齐」写成带条件的事实：本机无 CJK 等宽字体时 4 个汉字比 4 个 ASCII 宽约 22px，装了 Sarasa Mono SC / Noto Sans Mono CJK 即自愈。
+- Changelog 版本号：本文件当前停在 v0.9（§0.2–§0.4 那轮）；P2.5/P3/§0.5 这一轮的记录散在 §20/§21，尚未归并成 v1.x 条目——**下次动文档时一起补**。
+
+---
+
 ## 1. 为什么不用 Termius
 
 | 维度   | Termius 现状         | 我们要的                        |
@@ -333,7 +609,7 @@ search(q: string): Snippet[] {
 | 片段复用 | 只能粘进当前会话           | 变量渲染 + 一键执行 + 输出归档          |
 | 数据归属 | 存在它云端，导出困难         | 本地 YAML 文件，拷走即迁移，git 可 diff |
 | 执行能力 | 只会发 shell 命令       | 还能驱动桌面 GUI（走 ahk.bat）       |
-| 多目标  | 需要手工各连一遍           | 一条片段投多台，收并列结果（P5：要先有 ssh 驱动）           |
+| 多目标  | 需要手工各连一遍           | 一条片段投多台，收并列结果（P3 已做「同目标多开」与并列面板；跨机要等 P5 的 ssh）           |
 | 手机体验 | App 内功能齐全但片段编辑难用   | PWA，点一下就跑，不依赖实时输入           |
 
 结论：不是要做一个「更好的 Termius」，是要做一个**片段优先**的工作台。v0.2 把这句话落到了实处：本期根本没有交互终端，只有片段 + 执行结果。
@@ -513,16 +789,35 @@ steps:
   - { do: sleep, ms: 300 }
 ```
 
-本期 `steps` 动词两种：
+本期 `steps` 动词三种：
 
-| `do`    | 含义           | 关键参数                         |
-| ------- | ------------ | ---------------------------- |
-| `run`   | 无头执行，收输出与退出码 | `cmd`, `timeout`, `optional` |
-| `sleep` | 等待           | `ms`                         |
+| `do`     | 含义                | 关键参数                                  |
+| -------- | ----------------- | ------------------------------------- |
+| `run`    | 无头执行，收输出与退出码      | `cmd`, `timeout`, `optional`          |
+| `sleep`  | 等待                | `ms`                                  |
+| `expect` | 对文本做正则断言（不执行命令）   | `match`, `from`, `flags`, `timeout`, `interval`, `optional` |
 
-（`insert` / `send` 留给 P5 的交互会话；`expect` 正则条件步 P4 实装。）
+（`insert` / `send` 留给 P5 的交互会话。）
 
-通用参数：`timeout`（秒，走桥时 ≥ 20）、`optional`（失败继续）。
+`expect` 的三种取文来源（`from`）：
+
+| `from` | 取什么 | 是否等待 |
+|---|---|---|
+| `last`（缺省） | 往前找最近一条有输出的 `run` 步 | 否（exec 整段返回，立刻判定） |
+| `all` | 本次 run 到目前为止所有 `run` 步的输出拼起来 | 否 |
+| `file:<路径>` | 读文件内容（日志、`.exit`、runlog） | **是**：每 `interval`（默认 200ms）重读一次，到 `timeout`（默认 10s）仍不匹配则判失败 |
+
+```yaml
+id: wait-hexo-ready
+steps:
+  - { do: run, cmd: 'type D:\blog\hexo.log' }
+  - { do: expect, match: 'Hexo is running at', from: 'file:D:\blog\hexo.log', timeout: 20 }
+  - { do: expect, match: 'Generating done', from: last }
+```
+
+`flags` 只认 `i` / `m` / `s`——`g` 会被**静默去掉**（`RegExp.test()` 在 `g` 下带 `lastIndex`，同一个正则连测两次会一真一假，这种 bug 在片段里极难查）。
+
+通用参数：`timeout`（秒，走桥时 ≥ 20；`expect` 的 `timeout` 是等文件的时间）、`optional`（失败继续）。
 
 ### 5.3 「自定义」的四个口子
 
@@ -553,7 +848,7 @@ data/
 │  └─ 运维/部署.yaml
 ├─ secrets.yaml          # gitignore
 ├─ tmp/run-<runId>.cmd   # 临时批文件，GBK，定期清理
-└─ runs/<runId>.jsonl    # 执行历史（可选，P4）
+└─ runs/<runId>.jsonl    # 执行档案（P4 已实现）：meta / event×N / summary 三段
 ```
 
 目录层级 = 分组路径，也可用文件内 `group:` 覆盖。一个文件放单条或列表都行。
@@ -578,10 +873,10 @@ data/
   → 入串行队列（queue:false 的纯读命令跳过）
   → 逐 step 调 driver.run()，事件实时推 SSE
   → 每步结果累积，遇到的第一个非 optional 失败即中止
-  → 收尾写 runs/<runId>.jsonl，返回汇总（每步 exit / 耗时）
+  → 落盘 runs/<runId>.jsonl（首行 meta / 中间每条事件 / 末行 summary），返回汇总
 ```
 
-run 是服务端行为：前端断开不影响执行；重连按 runId 补拉事件尾（SSE Last-Event-ID）。
+run 是服务端行为：前端断开不影响执行（`send()` 见 `closed` 就丢，命令照跑）。首条 `start` 事件带 `runId`，前端存住；**不做 SSE 续传**（`Last-Event-ID` 只在同一条连接上有意义，页面一关就没了）——要回看就打 `GET /api/runs/:runId` 重放整份档案。
 
 ### 6.2 没有交互会话之后
 
@@ -590,15 +885,17 @@ run 是服务端行为：前端断开不影响执行；重连按 runId 补拉事
 - 「服务重启丢会话」这条风险随之消失；run 档案落盘，只能看不能接——本来也不接。
 
 
-### 6.3 多目标并发（预留形态）
+### 6.3 多目标（P3 已实现，跨机并列留到 P5）
 
-`POST /api/run` 支持 `targets: [win-desktop, …]`：
+`POST /api/run` 接受 `targets: ["win-desktop", "win-desktop"]`：
 
-- exec 目标全部进同一条串行队列，事件按目标打标；
-- reserved 目标（home-win / vps）跳过，并在结果里标注「未激活」；
-- 前端并列展示。P5 激活 local / ssh 后，这两个目标才真正并发。
+- **同一目标允许重复**：那是单机唯一能表达「多开」的方式，数组顺序 = 结果并列顺序；
+- **校验全在开流前**：空数组 / 非数组 / 未知目标 / 任一 `reserved` → `400`，整条拒绝（不做「跳过并标注」，因为一次请求只返回一条 SSE 流，半个成功最难解释）；
+- **事件逐条打标**：`{ ...event, target, targetIndex }`，前端按 `targetIndex` 分流到各自面板；
+- **并发拉起、串行执行**：服务端 `Promise.all` 同时启动 N 个 `runSnippet`，但它们共用同一个 `ExecDriver`（按 `bridgeRoot` 缓存）→ 全局串行队列，实际严格一个接一个。**P5 接 ssh 后这段不用改就是真并发**；
+- **上限 8 个**（`MAX_TARGETS`）：只是防呆，不是产品限制。
 
-> **P3 只做「同目标多开」**：数据模型、目标选择器、reserved 置灰、事件打标、结果并列都先落地，但可执行目标仍然只有 `win-desktop`，所以实际是「同一条片段在这台机器上排队跑 N 次」。真正的跨机并行要等 P5 的 ssh —— 见 §9 的执行顺序说明。
+> **P3 只做「同目标多开」**：数据模型、目标选择器、reserved 置灰、事件打标、结果并列都落地了，但可执行目标仍然只有 `win-desktop`，所以实际是「同一条片段在这台机器上排队跑 N 次」。真正的跨机并行要等 P5 的 ssh —— 见 §9 的执行顺序说明。
 
 ### 6.4 编码与中文（已知雷区）
 
@@ -667,12 +964,14 @@ remote text control/                 # 仓库根
 | **P0** 技术验证   | Monorepo 骨架；exec 驱动 spawn `ahk.bat status` 跑通；Fastify + SSE 一条 run 事件流；`scripts/start-server.ps1` + `install-autostart.ps1`（登录时计划任务、读 `.env`、日志落 `data/logs/server.log`）   | `npm test` 全绿；手机走 Tailscale 打开网页，点 `check-instence` 看到实例表；服务重启后片段索引自动重建                      |
 | **P1** 内核     | `core` 片段模型 + YAML 读写 + 索引 + 校验/quarantine；exec 驱动（双模式 + 串行队列 + 健康检查）；CLI；16 条存量迁移 | ✅ 2026-10-24 完成：`snip run` 带变量真的点中实例（notepad 回环实测）；改/删 YAML 1s 内索引变化；flag 为下拉（choices [0,1,2]）。记录见 §17 |
 | **P2** Web 界面 | 片段面板 + 变量表单 + 运行抽屉 + 输出查看 + 队列可视化 + 手机布局 + PWA                                     | ✅ 2026-10-24 完成：手机 390×844 仿真下点卡片出表单（4 字段）、点只读片段出抽屉（7 行、完成 0.1s）；队列显示「排队 N / 等待 Xs」。记录见 §18 |
-| **P2.5** 电脑端 UI | 桌面布局（左侧分组栏 + 多列网格 + 内容宽上限）；抽屉改**右侧全高面板**；输出区字体与排版重做（CJK 等宽栈、不折行、管道表对齐）；桌面快捷键 | ✅ 2026-10-29 完成：CDP 实测 1920/1366 无横向溢出、4 列、标题 nowrap、抽屉 720×全高（`top:0`）、`white-space:pre`；390 手机态不退化（单列、底部抽屉）。实施与偏差见 §20 |
-| **P3** 多目标（数据结构） | `targets[]` 数组 + 目标选择器 + reserved 置灰 + **同目标多开**（串行、结果并列、事件按目标打标） | 选 2 个 `win-desktop` 得到两组并列结果，事件带 target 标签且严格串行；`home-win` / `vps` 灰显、开流前 400。**跨机并列不在本期**，见 P5 |
-| **P4** 打磨     | `expect` 条件步；从 shell 历史导入；运行历史落盘（`runs/<id>.jsonl`）。*secret 变量 / danger 二次确认 / bridge 预览已在 P1–P2 落地* | 新机器上 30 分钟导入历史并跑通一条；`expect` 超时判失败；断开 SSE 后仍能回看上次运行 |
+| **P2.5** 电脑端 UI | 桌面布局（左侧分组栏 + 多列网格 + 内容宽上限）；抽屉改**右侧全高面板**；输出区字体与排版重做（CJK 等宽栈、不折行、管道表对齐）；桌面快捷键 | ✅ 2026-10-29 完成：CDP 实测 1920/1366 无横向溢出、4 列、标题 nowrap、抽屉 720×全高（`top:0`）、`white-space:pre`；390 手机态不退化（单列、底部抽屉）。实施与偏差见 §20。**已稳定**：复验遗留 ISSUE-005（390 多目标头部折行）已修，回归见 §0.5 / `npm run ui:multi` |
+| **P3** 多目标（数据结构） | `targets[]` 数组 + 目标选择器 + reserved 置灰 + **同目标多开**（串行、结果并列、事件按目标打标） | ✅ 2026-10-29 完成：选 2 个 `win-desktop` 得到两块并列面板（`win-desktop #1/#2`），事件带 `target`/`targetIndex` 且严格串行（冒烟实测总耗时 4.4s ≈ 单条 ×2）；`home-win` / `vps` 灰显、开流前 400。实施与偏差见 §21。**已稳定**：复验遗留 ISSUE-006 / 007 / 008 均已修（宽度 / 上限与错误呈现 / 可达性），回归见 §0.5。**跨机并列不在本期**，见 P5 |
+| **P4** 打磨（**已完成 10-30**） | `expect` 条件步；从 shell 历史导入；运行历史落盘（`runs/<id>.jsonl`）+ `/api/runs` + 抽屉回放。*secret 变量 / danger 二次确认 / bridge 预览已在 P1–P2 落地* | 新机器上 30 分钟导入历史并跑通一条；`expect` 超时判失败；断开 SSE 后仍能回看上次运行。**实测见 §22** |
 | **P5** 驱动扩展   | local（PTY）+ ssh（ssh2）；`insert` / `send` 动词；xterm 终端页；**跨机并列（原 P3 验收：win-desktop + vps 同时投）** | 一条片段投两台真机、收并列结果；reserved 目标变可执行 |
 
 执行顺序调整为 **P4 → P3 → P5**：P3 的卖点是「一条片段投多台」，但第二台可达主机只能靠 ssh（P5）——`home-win` 的 `local` 驱动是同一台机器，激活它也不产生「多台」。所以先做不依赖新驱动的 P4 打磨；P3 缩到数据模型 + 同目标多开（只有一个可选项时，选择器做了也看不出效果，等 P5 临近再补）；跨机并列的验收整条挪进 P5。P2.5 已于 10-29 完成，排在这两者之前。
+
+> **实际执行**：P2.5 之后先做了 P3（10-29 完成，见 §21），随后回补 §0.5 的四条问题（§0.6），P4 于 10-30 完成（见 §22）。P3 做完仍只有 `win-desktop` 一个可执行目标，选择器的价值确实要等 P5 才完全兑现——这段时间它最大的用处是「同一条命令连跑两次做对照」（比如点下坐标前后各看一次实例表）。
 
 ---
 
@@ -700,7 +999,7 @@ remote text control/                 # 仓库根
 - **单一 token 准入**：首次在本机 loopback 生成 token，手机扫码配对后写 cookie（搬 TxtTunnel 的做法）。
 - **危险动作二次确认**：片段可标 `danger: true`，执行前弹确认；`kill` / `admin:` 类默认标记。
 - **执行前预览**：bridge 类动作默认展示渲染后的最终命令行，确认后才发（对不可撤销动作）。
-- **审计**：`runs/<runId>.jsonl` 记录谁在什么设备上跑了什么片段、退出码多少。
+- **审计**：`runs/<runId>.jsonl` 记录谁在什么设备上跑了什么片段、退出码多少（P4 已实现）。**secret 变量的实际值不落盘**：落盘时逐字面量抹成 `***`，`meta.vars` 只留键名（< 4 字的短值不抹，防误伤正常输出——短 secret 应重设）。档案本身**不设 token 之外的保护**，分享前先看一遍。
 - **单用户假设**：多用户、权限分级不在本期范围，硬要加会让鉴权和片段隔离复杂度翻三倍。
 
 ---
@@ -760,9 +1059,13 @@ remote text control/                 # 仓库根
 | GET | `/api/snippets/:id` | — | `SnippetView`；不存在 404 |
 | POST | `/api/snippets/:id/preview` | `{vars}` | `{cmds,pending,missing,redacted}`；secret 渲染为 `***`；未填变量保留 `{{x}}` |
 | GET | `/api/hosts` | — | `{name,driver,reserved,default}[]` |
-| POST | `/api/run` | `{id,vars?,target?,confirm?}` | `text/event-stream` |
+| POST | `/api/run` | `{id,vars?,targets?,target?,confirm?}` | `text/event-stream`；每条事件带 `target` + `targetIndex`；首条 `start` 额外带 `runId` |
+| GET | `/api/runs` | `?limit=20&snippet=<id>` | `RunListItem[]`（倒序）；每项是档案首行 `meta` + 末行 `summary` 的合并，带 `ok/durationMs/panes/eventCount` |
+| GET | `/api/runs/:runId` | — | `{meta, events, summary}`；`runId` 不匹配 `^\d{8}-\d{6}-[a-z0-9]{4}$` 直接 404（不做路径拼接，不读穿目录） |
 
-`/api/run` 的失败码都在**开流之前**判定：snippet 不存在 → 404；danger 未确认 / 目标未知 / 目标 `reserved` → 400。开流之后只剩 `error` 事件。
+`/api/run` 的目标入参优先级：`targets[]` > `target` > 片段 `target` > hosts 的 `default`。`targets[]` 里**同一目标可以重复**（同目标多开），最多 8 个。
+
+`/api/run` 的失败码都在**开流之前**判定：snippet 不存在 → 404；danger 未确认 / `targets` 非数组或为空 / 目标未知 / 目标 `reserved` → 400（多目标里**任一** reserved 就整条拒绝）。开流之后只剩 `error` 事件。
 
 ## 15. 事件与片段字段参考
 
@@ -770,12 +1073,14 @@ remote text control/                 # 仓库根
 
 | type | 字段 | 含义 |
 |---|---|---|
-| `start` | `stepIndex`, `cmd?` | `stepIndex=-1` 表示整条 run 开始（server 用它打目标名） |
+| `start` | `stepIndex`, `cmd?`, `runId?` | `stepIndex=-1` 表示整条 run 开始（此时带 `runId`）；`stepIndex≥0` 的 `cmd` 是渲染后的命令行 |
 | `queued` | `stepIndex`, `waitedMs` | 排队超过 50ms 才发，UI 显示等待时长 |
 | `stdout` / `stderr` | `data` | **整段**返回（当前不做逐行流式） |
-| `step` | `ok`, `exitCode`, `durationMs` | 单步收尾 |
+| `step` | `ok`, `exitCode?`, `durationMs?`, `note?`, `expect?`, `matched?` | 单步收尾；`expect` 步带 `expect`（正则源串）与 `matched`（命中文本，空白压成单空格、超 120 字截断） |
 | `exit` | `ok`, `exitCode`, `durationMs`, `timedOut?` | 整条 run 收尾；`timedOut` 表示被驱动杀掉 |
 | `error` | `message`, `stepIndex?` | 变量缺失、目标错误等 |
+
+**每条事件都带 `target`（hosts 键）+ `targetIndex`（本次 `targets[]` 的下标）**，由 server 在多目标执行时打标。单目标时也在，前端靠它决定渲染到哪块面板；同一目标多开时两个字段值会重复 `target`，只能靠 `targetIndex` 区分。
 
 **片段字段**
 
@@ -787,9 +1092,9 @@ remote text control/                 # 仓库根
 | `target` | 否 | `hosts.yaml` 的键；缺省取 `default: true`，再缺省第一个非 reserved |
 | `shell` | 否 | `cmd` / `powershell`；缺省取目标 `shell`，再缺省 `cmd` |
 | `vars` | 否 | `prompt` / `default` / `choices` / `secret` / `from: env:XXX` |
-| `steps` | 是 | `{do: run, cmd, timeout?, optional?, queue?}` 或 `{do: sleep, ms}` |
+| `steps` | 是 | `{do: run, cmd, timeout?, optional?, queue?}` / `{do: sleep, ms}` / `{do: expect, match, from?, flags?, timeout?, interval?}` |
 
-**quarantine 条件**（该文件不进索引、不可运行，其余片段不受影响）：YAML 解析失败、缺 `id`、缺 `steps`、step 不合法、`id` 重复。
+**quarantine 条件**（该文件不进索引、不可运行，其余片段不受影响）：YAML 解析失败、缺 `id`、缺 `steps`、step 不合法（`do` 未知 / `run` 缺 `cmd` / `sleep` 缺 `ms` / `expect` 缺 `match` / `expect.flags` 非字符串 / `expect.from` 不是 `last`|`all`|`file:<路径>`）、`id` 重复。
 
 **命令语义的三个已知边界**
 
@@ -806,7 +1111,7 @@ remote text control/                 # 仓库根
 | 自启 | `powershell -File .\scripts\install-autostart.ps1`（登录时计划任务）；`-Uninstall` 卸载 |
 | 配置 | 复制 `.env.example` 为 `.env`（已 gitignore） |
 | 服务启动器 | `npm run sync:launchers` —— 生成 GBK 的 `%AHK_ROOT%\launchers\{hexo,txttunnel,backtrans}.bat`；`shell` 片段依赖它 |
-| 测试 | `npm test` = typecheck + `test:queue` + `test:cmd` + `test:search`(14) + smoke（33 项）。冒烟 fixture 落系统 temp（`mkdtemp`），跑完自动删；**清理失败只 warn，不改退出码**——本机注入的 safe-delete shim 曾让全绿的测试红掉（ISSUE-004）。静态壳免 token 的 5 条用例在 `packages/web/dist` 不存在时整组跳过并打 `~`（先 `npm run build:web`）。搜索语义由 `test:search` 单独钉（`npm run test:search`） |
+| 测试 | `npm test` = typecheck + `test:queue` + `test:cmd` + `test:search`(14) + `test:expect`(28) + `test:import`(41) + smoke（59 项）。冒烟 fixture 落系统 temp（`mkdtemp`），跑完自动删；**清理失败只 warn，不改退出码**——本机注入的 safe-delete shim 曾让全绿的测试红掉（ISSUE-004）。静态壳免 token 的 5 条用例在 `packages/web/dist` 不存在时整组跳过并打 `~`（先 `npm run build:web`）。多目标的 5 条校验 + 4 条实跑用例用**不打桥**的 `ping -n 3` 片段，listener 离线也跑（串行断言靠事件区间不重叠 + 总耗时 ≥ 3.5s）。运行档案的 12 条用例在临时数据目录里真跑两次 run 再读盘（含 secret 不落盘）。搜索语义 `npm run test:search`；多目标 UI `npm run ui:multi`；历史回放 UI `npm run ui:history`（后两个需服务在线，不进 `npm test`） |
 
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
@@ -1033,7 +1338,118 @@ npm run ui:shot -- http://127.0.0.1:7878/ 390  844  data/tmp/ui-mobile-regress.p
 4. **中英混排仍对不齐**：中文落到 `Microsoft YaHei`（本机未装 Sarasa Mono SC / Noto Sans Mono CJK SC），4 个汉字比 4 个 ASCII 宽约 22px。装上 CJK 等宽字体后自愈。
 5. **顶栏右侧被面板盖住**（`top:0` 是验收项），运行中看不到 bridge/queue 徽标；面板头部自带运行状态。
 
-**已知缺口**：抽屉覆盖而非挤压（1920 下约 1.5 列不可见）；分组折叠未做；`Ctrl+K` 按 §19.5 不做。
+**已知缺口**：抽屉覆盖而非挤压（1920 下约 1.5 列不可见）；分组折叠未做；`Ctrl+K` 按 §19.5 不做。**2026-10-29 复验另查出四条（手机多目标头部折行、并列 pane 右裁 56px、`.card-fan` 隐形热区，见 §0.5）**——这些不在本期验收项里，是补测发现的。
+
+---
+
+## 21. P3 实施记录（2026-10-29）
+
+**这一期做了什么**
+
+| 块 | 具体 |
+|---|---|
+| 数据模型 | `POST /api/run` 接受 `targets: string[]`；同一目标可重复（同目标多开），最多 8 个；优先级 `targets[]` > `target` > 片段 `target` > hosts `default` |
+| 校验 | 空数组 / 非数组 / 空字符串项 / 未知目标 / 任一 `reserved` → 开流前 `400`，整条拒绝 |
+| 事件打标 | `RunEvent` 全部成员加可选 `target` + `targetIndex`（core 导出的 `TargetTag`）；server 每条事件合并进去；**删掉了原来那个 `cmd: "[target xxx]"` 的假 start 事件**，目标名现在走字段而不是藏在命令文本里 |
+| 执行 | 服务端 `Promise.all` 同时拉起 N 个 `runSnippet`，共用按 `bridgeRoot` 缓存的同一个 `ExecDriver` → 队列天然串行；P5 接 ssh 后不用改就是真并发 |
+| 目标选择器 | 卡片右上角 `⊕`（手机常显、桌面悬停显示）→ 打开表单弹窗，顶部是目标区：已选 chips（同名带 `#1/#2`，可 ×）+ 可选目标按钮（reserved 灰显带 `P5` 角标）。`⊕` 会**预选一个**目标（片段 target 或 hosts default），再点一次就是「多开」 |
+| 结果并列 | `output.lines` → `output.panes[]`，每块 pane 独立 `lines / running / ok / durationMs / exitCode / note`；事件按 `targetIndex` 路由；抽屉 `multi` 态加宽到 `min(1100px, 88vw)`，内部 `grid-template-columns: repeat(var(--cols), 1fr)`；`--cols` 上限 3 |
+| 汇总状态 | 多目标时头部显示 `2/2 成功 · 34ms` + `N 目标` 徽章，每块 pane 自己一条 `完成/失败/超时` |
+
+**验收实测**
+
+| 项 | 结果 |
+|---|---|
+| `npm test` | **46 通过 / 0 失败**（原 35 + 多目标 11 条） |
+| 严格串行（冒烟） | 两个 `win-desktop` 跑 `ping -n 3`：两组 `stdout/step` 事件区间不重叠，总耗时 ≥ 3.5s（并行会接近 2s） |
+| 事件打标（冒烟） | `every(e => e.target === 'win-desktop')` 为真，`targetIndex` 集合 = `{0,1}`，两个 index 各有 `exit.ok=true` |
+| 校验（冒烟） | 空数组 / 未知目标 / 含 reserved / 非数组 / 空字符串项 五条全 `400` |
+| UI 1366×768 | `.panes.multi` 2 块、`grid-template-columns` 2 列、抽屉 1100px、页面 `scrollWidth - innerWidth = -15`（无横向溢出） |
+| UI 390×844 | 2 块、`cols=1`（堆叠）、无横向溢出 |
+| 防回退 | `npm run ui:queue` 仍通过（+500ms 命中 `排队 2`）；`npm run ui:shot` 单目标抽屉仍是 720×全高、`white-space:pre` |
+| 体积 | CSS 2.36 → 2.89KB gzip、JS 51.45 → 52.61KB gzip，无新增运行时依赖 |
+
+回归脚本：`npm run ui:multi`（CDP，1366 + 390 各 10 条断言，`MULTI_SHOT=0` 可关截图）。依赖服务在线，不进 `npm test`。
+
+**与设计/直觉不一样的取舍**
+
+1. **`⊕` 入口而不是「点卡片先弹目标选择」**：单点卡片的行为（有变量出表单、无变量直接跑）一个字没改，多开是显式的第二入口。代价是无变量片段想多开也必须点 `⊕`，而不是长按/双击那种更隐晦的手势。
+2. **`⊕` 预选一个目标**：打开就有 1 个 chip，再点一次变 2 个，少点一次。副作用是「想跑别的目标得先删掉预选的那个」——但只有一个可执行目标时这就是最省的操作。
+3. **reserved 整条拒绝，不做「跳过并标注」**：§6.3 原来写的是「跳过并标注未激活」，实现改成 `400`。理由：一条 SSE 流里混着「跑了的」和「没跑的」，前端得造第三套状态；而用户在多选界面里看到灰按钮本身就不会选它，`400` 只会在手写 API 时出现。
+4. **抽屉宽度 1100 而非按 pane 数线性放宽**：`min(1100px, 88vw)` 在 1366 上占 1100（盖住约 3.7 列卡片），1080p 上同样 1100。再宽就变成「两列各 800px 的空旷面板」。
+5. **`--cols` 上限 3**：4 个以上目标时列宽被压到 <300px，不如让它们更窄但保持在视口内。真要 8 路广播应该做「主面板 + 列表」，那是 P5 的事。
+6. **手机堆叠 + 每块 `max-height:26vh`**：390 宽并列等于每块 130px，读不了；堆叠后靠 `.panes` 自身滚动。
+7. **CLI 没做多目标**：`--targets a,b` 会和 `parseVars` 的 `--k=v` 规则打架，且终端里并列输出没有排版可谈。CLI 保持单目标，写进已知缺口。
+8. **删掉假 `start` 事件**：原实现给每条 run 发 `{type:'start', stepIndex:-1, cmd:'[target xxx]'}` 当前端能用的唯一渠道，前端再用 `cmd.startsWith('[')` 过滤掉。现在是真字段，那行 `if (ev.cmd)` 就干净了。
+
+**已知缺口**
+
+- 3 个以上目标在 1366 下每列约 360px，等宽输出基本只能看短命令；4+ 目标不建议。
+- 手机多目标要纵向滚动才能在两个 pane 间切换，没做「tab 切换」形态。
+- CLI 不支持 `--targets`。
+- 队列徽标仍是「长度」不是「第几位」（P2 §18 遗留，要做得多目标一起排位次）。
+- 跨机并列（真并发）仍等 P5 的 ssh 驱动；`home-win` / `vps` 继续灰显。
+- ~~两列并列时每块 pane 右裁 56px~~ **已修**（`.drawer.multi` 宽改 `min(1320px, calc(100vw - 48px))`，1366 每块 631 > 605）：见 §0.5 ISSUE-006。**仍存在**：**三列必然横滚**（`605*3+84 = 1899`，1366 屏物理放不下），这是取舍不是缺陷。
+- **超过 8 个目标时前端不拦**，服务端 400 后仍开 N 块空面板、错误串裸露 JSON。见 §0.5 ISSUE-007。
+
+---
+
+## 22. P4 实施记录（2026-10-30）
+
+**这一期做了什么**
+
+| 块 | 具体 |
+|---|---|
+| `expect` 条件步 | `core/expect.ts` 新增 `runExpect()`；`types.ts` 加 `StepExpect`，`Step` 变三动词联合。`from` 三源：`last`（往前找最近一条有输出的 run）/ `all`（本次 run 所有输出拼起来）/ `file:<路径>`（**真等待**：每 `interval` 重读，到 `timeout` 判失败；文件不存在不算错）。`flags` 白名单 `i/m/s`，`g` 静默去掉 |
+| 校验 | `snippets.ts` 在加载期就查：`match` 缺省 / `flags` 非字符串 / `from` 不是三源之一 → 该文件 quarantine，不是等跑起来才报 |
+| 变量与搜索 | `vars.ts` 的变量扫描把 `expect.from` 也算进去（`file:{{runlog}}` 能弹输入框）；`store.ts` 的 haystack 收 `expect.match`（「等 runlog」这类片段搜得到） |
+| 运行档案 | `core/runs.ts`：`RunLog`（list / read / prune）+ `RunWriter`（meta → event×N → summary，`writeSync` 逐行追加）。id 形如 `20261030-001234-a1b2`，按文件名排序即时间排序。`prune()` 启动跑一次：留最近 500 份、30 天内 |
+| secret 落盘 | `RunWriter` 收 `redact[]`（secret 变量的**实际值**，长度 < 4 的不抹以防误伤正常输出），对 `cmd` / `data` / `message` / `note` / `matched` 逐个字面量换成 `***`；`meta.vars` 同样打码并记 `varsRedacted`。实时 SSE 照发原值（人就在屏幕前看自己填的东西） |
+| API | `GET /api/runs?limit=&snippet=`（倒序，limit 夹在 1–100）、`GET /api/runs/:runId`（`runId` 不匹配 `^\d{8}-\d{6}-[a-z0-9]{4}$` 直接 404，不做路径拼接） |
+| 事件 | 首条 `start`（`stepIndex=-1`）额外带 `runId`；`expect` 步的 `step` 事件带 `expect`（正则源串）与 `matched`（命中文本：空白压成单空格、>120 字截断加 `…`）。**先写盘再发流**：客户端断开后档案仍完整 |
+| 前端 | 顶栏 `🕘` 打开运行历史弹窗（时间 / 片段 / 目标 / 耗时 / 状态），点条目 → `GET /api/runs/:id` → 复用 `applyEvent` 在抽屉里回放，头部标 `🕘 历史时间`。回放态不跑计时、不显示「运行中」 |
+| CLI | `snip import-history [--from ps\|bash\|file:<路径>] [--limit N] [--group 名] [--shell cmd\|powershell] [--write] [--force]`；`snip runs [runId]` 看档案 |
+
+`import-history` 的四条克制：
+
+1. **默认 dry-run**：只打印「原始 N 行 → 丢弃 M 行 → 候选 K 条」，写盘要显式 `--write`。手写的 16 条片段一次被几十条历史淹掉是最坏的结果。
+2. **不覆盖**：目标文件已存在就标 `~` 跳过（`--force` 才覆盖），第二次导入不会冲掉改过的片段。
+3. **按结构丢残句**：多行命令在 PSReadLine 里被拆成多行，只剩半条（`Get-X | Where {$_.Y -like "*z*"`）语法不完整，导进来是必炸的片段。判据是括号/引号不成对、或以 `|` `{` `,` `=` 结尾、或以**续行符**（PS 反引号 / cmd `^`）结尾——`looksIncomplete()`，引号里的括号不算结构。实测本机 810 行历史里，这条规则比「像不像命令」多丢掉 80 行（都是被拆断的 `Set-ItemProperty` 长命令）。
+4. **危险命令一律 `danger: true`**：`Remove-Item -Recurse` / `shutdown` / `taskkill /f` / `git reset --hard` 等 16 条正则，命中后 Web 侧多一道确认框。
+
+**验收实测**
+
+| 项 | 结果 |
+|---|---|
+| `npm test` | **59 通过 / 0 失败**（46 → 59：`test:expect` 28 项、`test:import` 41 项、冒烟新增 13 条 runs 用例） |
+| `expect` 三源 | `last` / `all` / `file:` 各有命中与未命中断言；`file:` 用临时文件延迟写入验证「真等待」，超时 0.5s 判失败且 `note` 带路径 |
+| `g` flag | 用 `flags: 'g'` 编译后连测两次，断言结果不翻转（编译期就没有 `g`） |
+| 档案落盘 | 冒烟在临时数据目录真跑 `check-instance` + 双目标 `check-status`：`/api/runs` 非空、`/api/runs/:id` 的 `events.length` 与列表 `eventCount` 一致、末条事件是 `exit`、`summary.panes` 两个目标各一条 |
+| secret 不落盘 | 带 `token` 变量的 run：档案里命令回显与输出中的实际值都是 `***`，`meta.vars.token = "***"`，`varsRedacted = ["token"]` |
+| 非法 runId | 校验正则不通过 → 404（不是 500，也没机会拼路径） |
+| UI 1366 / 390 | `npm run ui:history` 26 条断言全过：列表四列（手机三列）、无横向溢出、点条目回放、头部带 🕘 时间、还原命令行与输出、回放态不显示「运行中」 |
+| 防回退 | `npm run ui:multi` 49 条断言仍全过（`.drawer-id` 加 `flex:1` 后并列头部仍是单行） |
+
+**与设计/直觉不一样的取舍**
+
+1. **`last` / `all` 不等待**：exec 驱动是「整段返回」，命令跑完才有输出，没有「还在流」的中间态，所以只有 `file:` 需要轮询。真要等长任务的输出，正确姿势是 `run` 一条 `type <日志>` 再 `expect from: file:`——不是把 expect 做成流式监听。
+2. **`g` 静默去掉而不是报错**：报错会让人去查「为什么不准用 g」，而真实后果（连测两次一真一假）只有踩过才知道。去掉 + 文档写一行，比让人读一遍 JS 正则状态机便宜。
+3. **档案用 jsonl 不用一个大 JSON**：run 中途被 kill 时 jsonl 只丢最后一行，JSON 会整份解析失败——排障档案最怕的正是「出事那次读不出来」。读的时候半行直接跳过。
+4. **先写盘再发流**：多一次 `writeSync`（本地盘，微秒级），换来「断开 / 关页面后档案完整」。反过来的话，客户端断开那一刻的收尾事件就丢了。
+5. **secret 值 < 4 字不抹**：`abc` 这种字面量替换会把正常输出（`abc123`、路径里的 `abc`）打成 `***`，档案反而失真。代价是 1–3 字的 secret 会明文落盘——这类 secret 本身就该重设。
+6. **`import-history` 默认 dry-run**：与「`snip run` 直接就跑」的风格相反，因为导入是**批量且不可逆地写文件**，而 run 是可重复的。
+7. **不覆盖已有文件**：第二次导入同名命令时 `slugify` 出的 id 一样，直接写会把用户改过的片段冲掉。跳过 + 打印 `~` 更安全。
+8. **回放不复用计时**：档案里只有事件，没有「当时的时间轴」。抽屉头部显示历史时间、状态栏直接给最终结论，不做逐条重演——那是调试器的活，不是排障的最小需求。
+9. **不加 SSE 续传**：`Last-Event-ID` 只在同一条连接内有效，页面一关就没了。档案 + `GET /api/runs/:id` 覆盖了「断开后回看」的真实场景，续传是成本高、命中率低的功能。
+
+**已知缺口**
+
+- 档案是追加式全量事件，单条 run 几十 KB，但 `data/runs` 会一直长；只靠启动时 `prune()`（500 份 / 30 天），服务长期不重启就不清。
+- 历史列表不分页，`limit` 上限 100；没有「按时间范围」「按状态」筛选。
+- 回放只读，不能「基于这次运行再跑一次」（`meta.vars` 有变量值，但 secret 已打码，重跑必须重填）。
+- 前端历史弹窗没有「删除这条档案」入口（要删得去 `data/runs/` 手动删）。
+- `import-history --from bash` 的 `--shell` 默认仍是 `powershell`，语义不兼容（`rm -rf` 这类会被当 PS 命令跑失败），要自己加 `--shell cmd`。
+- 片段 CRUD / Raw 编辑 API 仍未做：改片段只能改文件（`fs.watch` 会热更）。
 
 ---
 
@@ -1093,3 +1509,31 @@ npm run ui:shot -- http://127.0.0.1:7878/ 390  844  data/tmp/ui-mobile-regress.p
   - **P3 缩范围**：改名「多目标（数据结构）」——`targets[]` + 目标选择器 + reserved 置灰 + 同目标多开（串行、事件打标、结果并列）；跨机并列整条挪进 P5 验收。
   - **P4 提前**：`expect` 条件步、从 shell 历史导入、`runs/<id>.jsonl` 落盘；同时标注 secret / danger 确认 / 预览三项其实已在 P1–P2 落地，P4 实际只剩三条。
   - 执行顺序改为 **P4 → P3 → P5**，理由写在 §9 的「执行顺序」段；§12 待定项 4（先做 runs 还是 targets）随之结案；§6.3 补「P3 只做同目标多开」的说明；§0.1 的缺口清单改为按排期归属。
+- **v1.2**（2026-10-29，P3 多目标 · **完成**）：
+  - `POST /api/run` 接受 `targets[]`，同一目标可重复（同目标多开），上限 8；校验全在开流前（空/非数组/未知/reserved → 400，整条拒绝）。
+  - 事件全部带 `target` + `targetIndex`；删掉原先 `cmd: "[target xxx]"` 的假 start 事件。
+  - 服务端 `Promise.all` 拉起 N 个 `runSnippet`，共用同一个 `ExecDriver` → 队列保证严格串行；P5 接 ssh 后无需改动即真并发。
+  - 前端：卡片 `⊕` 打开目标选择器（chips 可重复、reserved 灰显带 `P5` 角标）；`output.lines` → `output.panes[]`，抽屉多目标加宽到 `min(1100px, 88vw)` 并并列 N 块面板，手机堆叠；头部汇总 `2/2 成功`。
+  - 冒烟 35 → **46 项**（5 条 targets 校验 + 6 条多目标实跑，含「事件区间不重叠」与「总耗时 ≥ 单条 ×2」两条串行断言，用不打桥的 `ping -n 3` 片段，listener 离线也跑）。
+  - 新增 `npm run ui:multi`（CDP 1366 + 390 各 10 条断言：reserved 灰显、chip 序号、并列/堆叠列数、无横向溢出）。
+  - 实施与八处取舍、五条已知缺口见 §21。
+- **v1.3**（2026-10-29，P2.5/P3 复验 + 四条新缺口入库，**均未修**）：
+  - 复验结论：`npm test` 46/46 退出码 0、`ui:multi` 20 条断言全过；API 边界（9 目标 400、`targets` 压过 `target`、8 目标 8 个 exit、失败×2 都 exit=1、`targetIndex` 连续、两 pane 无串台）全部符合设计。
+  - 新增 §0.5 与 §0.6：**ISSUE-005** 手机多目标抽屉头部折成两行（`drawer-id` 97×42、文本 2 行）；**ISSUE-006** 并列两列时每块 pane 输出右侧切 56px（`client 549 / scroll 605`，切掉时间戳尾）；**ISSUE-007** 超 8 目标前端不拦、错误裸 JSON（`! ERROR ApiError: {"error":…}` 重复 9 遍、状态写成「0/9 成功」）；**ISSUE-008** 桌面 `⊕` 隐形但可点（`opacity:0` + `pointer-events:auto`）且键盘不可达。
+  - **撤回一条误报**：上一轮报的「`/` 快捷键在 ≤1023 失效」不成立——当时用 `querySelector` 手写模拟命中了隐藏节点，真实按键（`Input.dispatchKeyEvent`）在三档下都聚焦正确。原文与撤回理由留在 §0.5 开头，避免以后照着修一个不存在的问题。
+  - 修复计划按 005 → 007 → 006 → 008 排，四条全在前端；每条带改动代码、验收判据与坑（如 `ellipsis` 必须配 `min-width:0`、`pointer-events:none` 时自身 `:hover` 永不触发）。
+- **v1.4**（2026-10-29 夜，§0.5 四项全部修完，**已修**）：
+  - **ISSUE-005 已修**：`.drawer-id` 加 `nowrap/ellipsis/min-width:0`，状态·目标数·按钮组 `flex-shrink:0`。390 双目标头部从 63px / id 两行 → 55px / 单行（55 是手机图标按钮 34 + padding 的正常高度，桌面仍是定高 48）。
+  - **ISSUE-006 已修**：`.drawer.multi` 宽 `min(1320px, calc(100vw - 48px))`。1366 抽屉 1318、1920 抽屉 1320，两档下两块 pane 都 `scrollWidth <= clientWidth`。三列横滚保留为取舍（物理放不下，不降字号）。
+  - **ISSUE-007 已修**：`api.ts` 新增 `parseError()`（取 `.error`）+ `ApiError.detail`、`api.run` 新增 `onStart`；`App.tsx` 加 `MAX_TARGETS=8` 三处拦截（disabled / onClick / 提交前）+ `field-note` 提示，`setOutput` 挪进 `onStart`，400 时回填 draft 并把错误放进表单。**所有** 400 的文案从此是人话，不再裸 JSON。
+  - **ISSUE-008 已修**：隐形态 `pointer-events:none`（显形挂 `.card:hover / :focus-within`）、补 `aria-label`、加 `T` 快捷键 + `.nav-hint` 文案；触屏（`hover:none`）仍常显。
+  - 回归：`npm run ui:multi` 20 → **49 项断言**（新增 005 头部单行、006 两档 pane 无横滚、007 上限与桩 400 呈现、008 未悬停不可点/悬停显形/T 键/触屏常显），全过；`npm test` 46/46 退出码 0；`npm run ui:queue` 通过。
+  - 记两条经验：**ellipsis 下 `getClientRects().length` 不等于行数**（会给「可见段 + 被裁段」两个矩形，要看不同 `top` 的个数）；**UI 已拦截的 400 从界面不可达**，回归要用 `page.evaluate` 桩 `window.fetch` 才能测到「错误回表单、不开抽屉」。
+- **v1.5**（2026-10-30，P4 打磨 · **完成**）：
+  - **`expect` 条件步**：`Step` 变 `run` / `sleep` / `expect` 三动词。`from` 三源 `last`（缺省，最近一条有输出的 run）/ `all` / `file:<路径>`（唯一**真等待**的源，`interval` 轮询到 `timeout`）；`flags` 白名单 `i/m/s`，`g` 静默丢弃（有状态匹配会一真一假）。写法错在加载期就 quarantine。`step` 事件带 `expect` + `matched`。
+  - **运行档案**：`data/runs/<runId>.jsonl` 三段式（meta / event×N / summary），启动 `prune()` 留 500 份 / 30 天。secret 变量的实际值在落盘时逐字面量抹成 `***`（< 4 字的不抹），`meta.vars` 打码并记 `varsRedacted`。**先写盘再发流**，断开/关页面后档案仍完整。
+  - **API**：`GET /api/runs?limit=&snippet=`、`GET /api/runs/:runId`（runId 正则校验，非法 404）；首条 `start` 事件带 `runId`。
+  - **前端**：顶栏 `🕘` 运行历史（时间/片段/目标/耗时/状态），点条目复用 `applyEvent` 在抽屉里回放并标 `🕘 历史时间`，回放态不跑计时。
+  - **CLI**：`snip import-history`（PSReadLine / bash / 任意文件 → 片段，默认 dry-run，`--write` 才落盘，不覆盖已有文件，按结构丢弃被拆断的半条命令，危险命令自动 `danger: true`）、`snip runs [runId]`。
+  - 测试 46 → **59 项冒烟**（`test:expect` 28、`test:import` 41、冒烟 +13 条 runs 用例）；新增 `npm run ui:history`（CDP 1366 + 390 共 26 条断言）。
+  - 九处取舍与六条已知缺口见 §22。

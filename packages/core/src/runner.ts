@@ -1,3 +1,4 @@
+import { runExpect } from './expect'
 import type { Driver, RunEvent } from './types'
 import { renderString, resolveVars } from './vars'
 import type { Snippet } from './types'
@@ -15,6 +16,9 @@ export type RunOpts = {
  * 显示成「完成」，所以这里额外看输出首行前缀。
  */
 const BRIDGE_ERR = /^ERR\|/m
+
+/** 单步累积输出的上限：`type 500MB.log` 不该把服务撑爆，expect 也只需要开头一段 */
+const ACC_MAX = 1 << 20
 
 export async function* runSnippet(
   snippet: Snippet,
@@ -36,6 +40,10 @@ export async function* runSnippet(
   const t0 = Date.now()
   yield { type: 'start', stepIndex: -1 }
 
+  // 下标 = stepIndex。`expect` 的 `from: last` 要靠它回溯到上一条 run 步的输出；
+  // sleep 步留 undefined，回溯时会自动跳过。
+  const outputs: (string | undefined)[] = []
+
   for (let i = 0; i < snippet.steps.length; i++) {
     const step = snippet.steps[i]!
     const s0 = Date.now()
@@ -46,10 +54,31 @@ export async function* runSnippet(
       continue
     }
 
+    if (step.do === 'expect') {
+      // `from` 里可能有变量（`file:{{runlog}}`），先渲染再交给判定
+      const from = step.from ? renderString(step.from, values) : undefined
+      const r = await runExpect(step, from, outputs, i)
+      yield {
+        type: 'step',
+        stepIndex: i,
+        ok: r.ok,
+        durationMs: Date.now() - s0,
+        note: r.note,
+        matched: r.matched,
+        expect: step.match,
+      }
+      if (!r.ok && !step.optional) {
+        yield { type: 'exit', ok: false, durationMs: Date.now() - t0 }
+        return
+      }
+      continue
+    }
+
     let ok = false
     let exitCode: number | undefined
     let timedOut = false
     let bridgeErr = false
+    let acc = ''
     try {
       const cmd = renderString(step.cmd, values)
       for await (const ev of driver.run({
@@ -64,13 +93,19 @@ export async function* runSnippet(
           exitCode = ev.exitCode
           timedOut = !!ev.timedOut
         } else {
-          if (ev.type === 'stdout' && BRIDGE_ERR.test(ev.data)) bridgeErr = true
+          if (ev.type === 'stdout') {
+            if (BRIDGE_ERR.test(ev.data)) bridgeErr = true
+            if (acc.length < ACC_MAX) acc += ev.data.slice(0, ACC_MAX - acc.length)
+          } else if (ev.type === 'stderr') {
+            if (acc.length < ACC_MAX) acc += ev.data.slice(0, ACC_MAX - acc.length)
+          }
           yield ev
         }
       }
     } catch (e) {
       yield { type: 'error', stepIndex: i, message: e instanceof Error ? e.message : String(e) }
     }
+    outputs[i] = acc
 
     const note = ok && bridgeErr ? '输出以 ERR| 开头（桥侧失败但退出码为 0）' : undefined
     if (bridgeErr) ok = false
