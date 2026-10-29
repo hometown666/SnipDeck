@@ -371,6 +371,9 @@ async function openFan(width, height) {
 
   const fan = await evaluate(`(() => {
     const card = [...document.querySelectorAll('.card')].find((c) => c.textContent.includes(${JSON.stringify(SNIPPET)}))
+    // 目标卡片可能在首屏之外（片段库变大后就会）：不滚进视口，
+    // 后面 dispatchMouseEvent 的坐标落在视口外，:hover 永远不成立 → 假失败（ISSUE-016）
+    card.scrollIntoView({ block: 'center' })
     const f = card.querySelector('.card-fan')
     const r = f.getBoundingClientRect()
     const s = getComputedStyle(f)
@@ -394,6 +397,7 @@ async function openFan(width, height) {
 
   const center = await evaluate(`(() => {
     const card = [...document.querySelectorAll('.card')].find((c) => c.textContent.includes(${JSON.stringify(SNIPPET)}))
+    card.scrollIntoView({ block: 'center' })
     const r = card.getBoundingClientRect()
     return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
   })()`)

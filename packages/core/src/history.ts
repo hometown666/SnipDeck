@@ -55,7 +55,7 @@ const NOISE = new Set([
 
 const DANGER_PATTERNS: RegExp[] = [
   /\brm\s+-(r|rf|fr)\b/i,
-  /\bRemove-Item\b.*-Recurse/i,
+  /\bRemove-Item\b.*-(Recurse|Force)/i,
   /\bdel\b\s+.*\/[fsq]/i,
   /\b(rd|rmdir)\b\s+.*\/s/i,
   /\bformat\s+[a-z]:/i,
@@ -65,7 +65,20 @@ const DANGER_PATTERNS: RegExp[] = [
   /\b(Restart|Stop)-Computer\b/i,
   /\bStop-Process\b/i,
   /\btaskkill\b.*\/f/i,
-  /\breg\s+delete\b/i,
+  // 服务：停/删/改服务等于改系统行为，`Restart-Service TermService -Force`
+  // 就是「把远程桌面踢掉」，历史里很常见（ISSUE-012）
+  /\b(Restart|Stop|Set|New|Start)-Service\b/i,
+  /\bsc(\.exe)?\s+(create|delete|config|stop|start|failure)\b/i,
+  // 注册表：写 HKLM/HKCR/HKU 影响全机，`Set-ItemProperty 'HKLM:/…'` 与 `reg add` 等价
+  /\breg\s+(add|delete|import|restore)\b/i,
+  /\b(Set|New|Remove|Rename)-ItemProperty\b.*\bHK(LM|CU|CR|U|EY|CC)\b/i,
+  /\bRemove-ItemProperty\b/i,
+  /\bschtasks\b/i,
+  /\bnet\s+(user|localgroup)\b/i,
+  /\btakeown\b/i,
+  /\bicacls\b/i,
+  /\bbcdedit\b/i,
+  /\bSet-ExecutionPolicy\b/i,
   /\bgit\s+reset\s+--hard\b/i,
   /\bgit\s+clean\s+-[a-z]*f/i,
   /\bgit\s+push\b.*--force/i,
@@ -102,8 +115,24 @@ export function looksIncomplete(cmd: string): boolean {
 }
 
 /**
+ * 控制台转录里混进来的提示符（ISSUE-011）。
+ *
+ * 从终端窗口整段复制粘贴时会把提示符一起带过来：
+ *   `PS C:\Users\x> Get-Date`  → 命令部分仍有用，剥掉前缀留下 `Get-Date`
+ *   `>>   Set-Item ...`        → 这是多行命令的第二行，孤零零导进来必炸，整条丢
+ *
+ * 只认 PS 的提示符形态（`PS <盘符>:\…>`）：cmd 的 `C:\>` 与真正的路径长得太像，
+ * 宁可漏掉那种少见情况，也不要把一条合法命令的前缀当提示符吃掉。
+ */
+export function stripPrompt(line: string): { text: string; continuation: boolean } {
+  if (/^>>/.test(line)) return { text: '', continuation: true }
+  return { text: line.replace(/^PS\s+[A-Za-z]:\\[^>\r\n]*>\s*/, ''), continuation: false }
+}
+
+/**
  * 清洗原始历史行：
  * - 去掉 bash 的 `#1672531200` 时间戳行（PSReadLine 不写，混着导入时常见）
+ * - 剥掉 `PS C:\…>` 提示符；`>>` 续行提示符整条丢
  * - 多行命令被拆成的续行（`looksIncomplete`）没法可靠合并，直接丢
  * - 去重（保序：同一命令只留第一次出现）
  * - 去噪（`cd`/`ls`/`clear` 之类）
@@ -113,7 +142,12 @@ export function normalizeHistory(lines: string[]): { kept: string[]; dropped: nu
   const seen = new Set<string>()
   let dropped = 0
   for (const raw of lines) {
-    const line = raw.trim()
+    const { text, continuation } = stripPrompt(raw.trim())
+    const line = text.trim()
+    if (continuation) {
+      dropped++
+      continue
+    }
     if (!line) {
       dropped++
       continue
@@ -152,9 +186,21 @@ export function slugify(cmd: string): string {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
     .toLowerCase()
-    .slice(0, 40)
-    .replace(/-$/, '')
-  return base || 'cmd'
+  return cutAtWord(base, 40) || 'cmd'
+}
+
+/**
+ * 按长度截断，但**尽量切在词边界**上。
+ * 硬切会把 `…-terminal-serv` 这种半截词留在 id 里，搜「server」就再也搜不到
+ * （标题仍留着全文，但 id 是文件名，用户也会照着 id 搜）。
+ */
+export function cutAtWord(s: string, max: number): string {
+  if (s.length <= max) return s
+  const cut = s.slice(0, max)
+  const at = cut.lastIndexOf('-')
+  // 边界太靠前（把大半内容都丢了）就不管词边界了
+  const kept = at >= Math.floor(max * 0.6) ? cut.slice(0, at) : cut
+  return kept.replace(/-+$/, '')
 }
 
 export type PlannedSnippet = {
@@ -209,7 +255,9 @@ export function planImport(opts: ImportOptions): ImportResult {
     const file = join(dir, `${id}.yaml`)
     planned.push({
       id,
-      title: cmd.length > 70 ? `${cmd.slice(0, 70)}…` : cmd,
+      // 标题保留全文：它同时是搜索面（title 权重最高），截断加 `…` 会让
+      // 「搜 Server 搜不到」——而看得见的长标题由前端 CSS 去折行/省略（ISSUE-015）。
+      title: cmd,
       cmd,
       danger: isDangerous(cmd),
       file,

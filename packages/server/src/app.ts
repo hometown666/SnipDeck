@@ -281,6 +281,7 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
                   exitCode: ev.exitCode,
                   durationMs: ev.durationMs,
                   timedOut: ev.timedOut,
+                  reason: ev.reason,
                   note: ev.note,
                 }
               } else if (ev.type === 'error') {

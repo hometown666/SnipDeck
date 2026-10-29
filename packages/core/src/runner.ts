@@ -68,7 +68,17 @@ export async function* runSnippet(
         expect: step.match,
       }
       if (!r.ok && !step.optional) {
-        yield { type: 'exit', ok: false, durationMs: Date.now() - t0 }
+        // 断言失败也算「这次 run 的结局」，必须把原因带出去：
+        // 只发一条光秃秃的 exit，UI 只能显示 `✗ failed exit=-`，
+        // 真正的原因（未匹配哪条正则）留在上一条 step 里，人和档案都看不到（ISSUE-013）。
+        yield {
+          type: 'exit',
+          ok: false,
+          stepIndex: i,
+          durationMs: Date.now() - t0,
+          reason: 'expect',
+          note: r.note,
+        }
         return
       }
       continue
@@ -107,12 +117,18 @@ export async function* runSnippet(
     }
     outputs[i] = acc
 
-    const note = ok && bridgeErr ? '输出以 ERR| 开头（桥侧失败但退出码为 0）' : undefined
-    if (bridgeErr) ok = false
+    // 桥的失败是「输出以 ERR| 开头但退出码 0」，与「命令自己返回非 0」要分开标，
+    // 否则界面只能靠 note 有没有值来猜，猜错就把普通失败说成桥报错。
+    let reason: 'bridge' | undefined
+    if (bridgeErr) {
+      ok = false
+      reason = 'bridge'
+    }
+    const note = reason ? '输出以 ERR| 开头（桥侧失败但退出码为 0）' : undefined
 
     yield { type: 'step', stepIndex: i, ok, exitCode, durationMs: Date.now() - s0, note }
     if (!ok && !step.optional) {
-      yield { type: 'exit', ok: false, exitCode, durationMs: Date.now() - t0, timedOut, note }
+      yield { type: 'exit', ok: false, exitCode, durationMs: Date.now() - t0, timedOut, note, reason }
       return
     }
   }

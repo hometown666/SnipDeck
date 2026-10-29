@@ -118,7 +118,9 @@ export type RunEvent =
       stepIndex?: number
       /** 被驱动超时杀掉（区别于命令自己返回非 0） */
       timedOut?: boolean
-      /** 失败但退出码为 0 时的说明 */
+      /** 失败原因：桥侧报错 / 断言未命中。界面据此选文案，不再靠猜 note 里的字 */
+      reason?: 'bridge' | 'expect'
+      /** 失败原因的具体说明（桥侧报错、未匹配的正则、等待了多久…） */
       note?: string
     } & TargetTag)
   | ({ type: 'error'; stepIndex?: number; message: string } & TargetTag)

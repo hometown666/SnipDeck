@@ -599,6 +599,91 @@ panes: 9
 - §20 验收表补「多目标 / 手机」一列（现在只有 1920 / 1366 / 390 单目标），并把「中英混排仍对不齐」写成带条件的事实：本机无 CJK 等宽字体时 4 个汉字比 4 个 ASCII 宽约 22px，装了 Sarasa Mono SC / Noto Sans Mono CJK 即自愈。
 - Changelog 版本号：本文件当前停在 v0.9（§0.2–§0.4 那轮）；P2.5/P3/§0.5 这一轮的记录散在 §20/§21，尚未归并成 v1.x 条目——**下次动文档时一起补**。
 
+### 0.7 待修缺口 ISSUE-009 ~ 016（2026-10-30 P4 复验，**全部已修 · 2026-10-30**）
+
+> 现场记录原样保留——它同时是回归用例的说明书。八条全部来自 P4 真跑复验：`expect` 三个源、运行档案、`import-history` 各踩到的坑。
+
+#### ISSUE-009：`expect from: file:` 读不了 UTF-16 LE，永远等不到（严重）—— **已修 · 2026-10-30**
+
+**现场**：桥写的 `instances.txt` / `last_result.txt` / `status.txt` / `jobs/*.exit` 全是 `ff fe` BOM + 双字节（`od -c` 确认）。`readFileSync(path,'utf8')` 得到夹 `\0` 的乱码 → 正则永不命中 → 死等 timeout，提示只写「未匹配」，会被误读成「文件还没写」。对照：UTF-8 文件 0ms 命中；同内容走 `run type` + `expect last` 1ms 命中。
+
+**修法**（`core/expect.ts` 新增 `decodeText()`）：按 BOM 分流（UTF-8 BOM / UTF-16 LE / UTF-16 BE），无 BOM 时看前 256 字节里 `0x00` 落在奇位还是偶位判 UTF-16；最后一层按 UTF-8 解，出现 `U+FFFD` 就回退 GBK（与驱动侧 `decodeOutput` 同一套判据）。顺带把 CRLF 统一成 LF——`^done$` 这类带 `m` 的锚点原来会被看不见的 `\r` 毁掉。
+
+**验收**：真桥文件 `C:/ahk_trigger/instances.txt` 用 `expect from: file:` 断言 `airmouse#\d+` → **2ms 命中**（修前 3s 超时）；`test:expect` 新增 UTF-16 LE+BOM / 无 BOM LE / BE+BOM / GBK 四组。
+
+#### ISSUE-010：一个恶意正则可以拖死整个服务（中）—— **已修 · 2026-10-30**
+
+**现场**：`(a+)+$` 对 30 个字符单次 `test` 约 8s（n=25/26/27 分别 250/501/1000ms，指数增长）；实测 `/api/health` 延迟 **8.13s**（正常 1.3ms），期间队列与 SSE 全停。`timeout` 字段救不了——同步 `exec` 卡完才检查 deadline。
+
+**修法**：`execGuarded()` 把 `re.exec(text)` 放进 `vm.runInContext(..., { timeout: 500 })` 执行。JS 层没法中断正则，但 V8 的 interrupt 能打断它。预算 500ms（正常正则跑 1MB 也才几毫秒）；超预算返回 `{kind:'timeout'}`，`note` 写「正则执行超过 500ms（疑似灾难性回溯）」，**不再伪装成「未匹配」**。上下文单例复用——`runInContext` 是同步调用，单线程下不会被别的请求插进来改写。
+
+**验收**：临时实例跑炸弹片段，期间 `/api/health` 采样 **1.3 / 20 / 13 / 1.3 / 1.5 / 1.4ms**；run 在 517ms 判失败并给出原因。`test:expect` 断言「<2s 返回」+「note 写灾难性回溯」。
+
+#### ISSUE-011：`import-history` 放过提示符行与续行提示符（中）—— **已修 · 2026-10-30**
+
+**现场**：本机历史里 4 行 `^PS [A-Z]:...>` 前缀（1 条完整进了候选，导入后 `PS` 不是命令且 `>` 会重定向），3 行 `^>>` 续行提示符（1 条进候选）。
+
+**修法**：`normalizeHistory()` 先过 `stripPrompt()`——`PS <盘符>:\…>` 剥掉前缀留命令，`>>` 整条丢（它是多行命令的第二行，孤零零导进来必炸）。cmd 的 `C:/>` 不认：与真实路径长得太像，宁可漏。
+
+**验收**：`test:import` 断言「PS 前缀被剥掉、`>>` 计入丢弃」；真实历史 dry-run 候选里已无 `PS ` 与 `>>` 开头的行。
+
+#### ISSUE-012：危险清单漏服务 / 注册表 / 计划任务 / 账户 / ACL 的写操作（中）—— **已修 · 2026-10-30**
+
+**现场**：`Restart-Service TermService -Force`、`Set-ItemProperty 'HKLM:/…' -Value 0` 都没标 danger，导入后点一下就直接执行，没有二次确认。
+
+**修法**：`DANGER_PATTERNS` 从 16 条扩到 28 条：`Restart/Stop/Set/New/Start-Service`、`sc create|delete|config|stop|start`、`reg add|delete|import|restore`、`Set/New/Remove/Rename-ItemProperty …HK(LM|CU|CR|U|EY|CC)`、`Remove-ItemProperty`、`schtasks`、`net user|localgroup`、`takeown`、`icacls`、`bcdedit`、`Set-ExecutionPolicy`；`Remove-Item` 原来只认 `-Recurse`，补 `-Force`。
+
+**验收**：`test:import` 的 danger 表从 8 条扩到 21 条，含 11 条新的真危险 + 3 条必须**不**误报（`Get-Service` / `Get-ItemProperty HKLM:` / `git status`）。
+
+#### ISSUE-013：expect 失败的 exit 事件缺原因，界面写「桥侧报错」（低）—— **已修 · 2026-10-30**
+
+**现场**：断言失败时 `exit` 只有 `{ok:false}` → UI 显示 `✗ failed exit=-`，真正原因（未匹配哪条正则）只留在上一条 `step` 里；档案 `summary` 也没有原因。更糟的是前端一律把「有 note」当桥报错，加了原因也会被写成「桥侧报错」。
+
+**修法**：`exit` 事件加 `reason?: 'bridge' | 'expect'`，断言失败带 `stepIndex` + `note`（未匹配的正则、等了多久），桥报错带 `reason:'bridge'`；`RunPaneResult` 同样记 `reason`，档案 `summary` 跟着有。前端 / CLI 按 `reason` 选文案，不再靠 note 有没有值去猜。
+
+**验收**：冒烟新增 3 条（`exit.reason=expect`、`note` 带未匹配、`stepIndex` 指断言步）+ 1 条档案 `panes[0].reason`；`test:expect` 3 条。
+
+#### ISSUE-014：`/api/runs` 列表泄漏存储用的 `kind`（低）—— **已修 · 2026-10-30**
+
+**现场**：`read()` 把 jsonl 的整行当 `RunMeta`，`kind:"meta"` 一起进了接口——类型里根本没这个字段。
+
+**修法**：解构时把 `kind` 摘掉（meta 与 summary 两处），不做整行 spread。
+
+**验收**：冒烟断言列表项与详情 meta/summary 都不含 `kind`；线上 `GET /api/runs?limit=1` 字段回到 12 个。
+
+#### ISSUE-015：导入的 title 硬截断带 `…`，搜不到尾部词（低）—— **已修 · 2026-10-30**
+
+**现场**：`title: cmd.slice(0,70) + '…'`，`...Terminal Serv…` 让「搜 Server 搜不到」；`slugify` 也硬切 40，把半截词留在 id 里。
+
+**修法**：title 保留全文（长标题交给前端折行/省略），`cutAtWord()` 让 id 尽量切在 `-` 边界上（边界太靠前就不管词边界）。
+
+**验收**：`test:import` 断言长命令 title 与原文完全一致、id ≤ 45（`hist-` + 40）且不以 `-` 结尾。
+
+#### ISSUE-016：`ui:multi` 的 008 段假设卡片在首屏内，库变大后假失败—— **已修 · 2026-10-30**
+
+**现场**：片段库从 16 条涨到 27 条后，`查看实例表` 卡片落到 **y=864**（视口高 768）。鼠标事件坐标在视口外 → `:hover` 永不成立 → 两条断言假红（`opacity 0` / 选择器不出现），但 CSS 与逻辑都没问题。
+
+**修法**：脚本在测 `⊕` 之前先 `scrollIntoView({ block: 'center' })` 再取矩形（两处：初次测量与悬停前）。
+
+**教训**：**UI 断言里凡是要发鼠标事件的坐标，必须先保证元素在视口内**——CDP 不会替你滚动，落在视口外的 `mouseMoved` 就是没发生。
+
+### 0.8 修复记录（2026-10-30，**八条全部已修**）
+
+| 序 | Issue | 性质 | 改动面 | 验收 | 状态 |
+|---|---|---|---|---|---|
+| 1 | ISSUE-009 | 功能阻塞（`file:` 源全废） | `expect.ts` 解码 + 换行 | 真桥 UTF-16 文件 2ms 命中 | **已修 10-30** |
+| 2 | ISSUE-010 | 可用性（单请求拖死全服务） | `expect.ts` `vm` 预算 500ms | 炸弹期间 health ≤ 20ms | **已修 10-30** |
+| 3 | ISSUE-011 | 数据质量（导进废片段） | `history.ts` `stripPrompt()` | 候选无 `PS `/`>>` 行 | **已修 10-30** |
+| 4 | ISSUE-012 | 安全（无确认即执行） | `history.ts` danger 清单 28 条 | danger 表 21 条断言 | **已修 10-30** |
+| 5 | ISSUE-013 | 可读性（失败看不懂） | `types/runner/app/web/cli/runs` | 冒烟 4 条 + 单测 3 条 | **已修 10-30** |
+| 6 | ISSUE-014 | 接口脏字段 | `runs.ts` 解构摘 `kind` | 列表/meta/summary 均无 `kind` | **已修 10-30** |
+| 7 | ISSUE-015 | 搜索退化 | `history.ts` title/id | title 全文、id 词边界 | **已修 10-30** |
+| 8 | ISSUE-016 | 测试脆弱（假失败） | `check-multi-target.mjs` | `ui:multi` 49 项全过 | **已修 10-30** |
+
+**排序理由**：009 与 010 是「`expect` 根本不可用」，先修；011/012 决定导进来的片段能不能信、敢不敢点；013/014/015 是呈现层的账；016 是测试自己的账，最后顺手清掉。
+
+**用例数量**：`test:expect` 28 → 40，`test:import` 41 → 60，冒烟 59 → 66。
+
 ---
 
 ## 1. 为什么不用 Termius
@@ -1111,7 +1196,7 @@ remote text control/                 # 仓库根
 | 自启 | `powershell -File .\scripts\install-autostart.ps1`（登录时计划任务）；`-Uninstall` 卸载 |
 | 配置 | 复制 `.env.example` 为 `.env`（已 gitignore） |
 | 服务启动器 | `npm run sync:launchers` —— 生成 GBK 的 `%AHK_ROOT%\launchers\{hexo,txttunnel,backtrans}.bat`；`shell` 片段依赖它 |
-| 测试 | `npm test` = typecheck + `test:queue` + `test:cmd` + `test:search`(14) + `test:expect`(28) + `test:import`(41) + smoke（59 项）。冒烟 fixture 落系统 temp（`mkdtemp`），跑完自动删；**清理失败只 warn，不改退出码**——本机注入的 safe-delete shim 曾让全绿的测试红掉（ISSUE-004）。静态壳免 token 的 5 条用例在 `packages/web/dist` 不存在时整组跳过并打 `~`（先 `npm run build:web`）。多目标的 5 条校验 + 4 条实跑用例用**不打桥**的 `ping -n 3` 片段，listener 离线也跑（串行断言靠事件区间不重叠 + 总耗时 ≥ 3.5s）。运行档案的 12 条用例在临时数据目录里真跑两次 run 再读盘（含 secret 不落盘）。搜索语义 `npm run test:search`；多目标 UI `npm run ui:multi`；历史回放 UI `npm run ui:history`（后两个需服务在线，不进 `npm test`） |
+| 测试 | `npm test` = typecheck + `test:queue` + `test:cmd` + `test:search`(14) + `test:expect`(40) + `test:import`(60) + smoke（66 项）。冒烟 fixture 落系统 temp（`mkdtemp`），跑完自动删；**清理失败只 warn，不改退出码**——本机注入的 safe-delete shim 曾让全绿的测试红掉（ISSUE-004）。静态壳免 token 的 5 条用例在 `packages/web/dist` 不存在时整组跳过并打 `~`（先 `npm run build:web`）。多目标的 5 条校验 + 4 条实跑用例用**不打桥**的 `ping -n 3` 片段，listener 离线也跑（串行断言靠事件区间不重叠 + 总耗时 ≥ 3.5s）。运行档案的 12 条用例在临时数据目录里真跑两次 run 再读盘（含 secret 不落盘、`reason` 归类、列表不含存储用的 `kind`）。`expect` 的文件源另测 4 种编码（UTF-16 LE/BE 有无 BOM、GBK）与 CRLF 锚点，正则执行有 500ms 预算（回溯炸弹会被截断而不是拖死服务）。搜索语义 `npm run test:search`；多目标 UI `npm run ui:multi`；历史回放 UI `npm run ui:history`（后两个需服务在线，不进 `npm test`） |
 
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
@@ -1451,6 +1536,8 @@ npm run ui:shot -- http://127.0.0.1:7878/ 390  844  data/tmp/ui-mobile-regress.p
 - `import-history --from bash` 的 `--shell` 默认仍是 `powershell`，语义不兼容（`rm -rf` 这类会被当 PS 命令跑失败），要自己加 `--shell cmd`。
 - 片段 CRUD / Raw 编辑 API 仍未做：改片段只能改文件（`fs.watch` 会热更）。
 
+**复验补修（2026-10-30 凌晨）**：P4 真跑复验又挖出 8 条，全部已修，现场与修法见 §0.7 / §0.8。值得一提的是两条根因都不在「逻辑写错」，而在**输入假设**：桥的文件是 UTF-16 LE（不是 UTF-8），正则执行是不可中断的同步调用（所以 `timeout` 形同虚设）。
+
 ---
 
 ## Changelog
@@ -1537,3 +1624,12 @@ npm run ui:shot -- http://127.0.0.1:7878/ 390  844  data/tmp/ui-mobile-regress.p
   - **CLI**：`snip import-history`（PSReadLine / bash / 任意文件 → 片段，默认 dry-run，`--write` 才落盘，不覆盖已有文件，按结构丢弃被拆断的半条命令，危险命令自动 `danger: true`）、`snip runs [runId]`。
   - 测试 46 → **59 项冒烟**（`test:expect` 28、`test:import` 41、冒烟 +13 条 runs 用例）；新增 `npm run ui:history`（CDP 1366 + 390 共 26 条断言）。
   - 九处取舍与六条已知缺口见 §22。
+
+- **v1.6**（2026-10-30 凌晨，P4 复验八条全修，**已修**）：
+  - **ISSUE-009**：`expect from: file:` 新增 `decodeText()`——按 BOM 分 UTF-8/UTF-16 LE/BE，无 BOM 看 `0x00` 位置，最后按 UTF-8 解出替换字符就回退 GBK（与驱动侧 `decodeOutput` 同判据）；CRLF 统一成 LF。真桥 `instances.txt`（UTF-16 LE）从「3s 超时」变 **2ms 命中**。
+  - **ISSUE-010**：正则执行改走 `vm.runInContext(..., {timeout:500})`，灾难性回溯被 V8 interrupt 截断；超预算记「疑似灾难性回溯」而不是「未匹配」。炸弹运行期间 `/api/health` 从 8.13s 回到 **1~20ms**。
+  - **ISSUE-011 / 012**：`import-history` 剥 `PS <盘符>:\…>` 前缀、丢 `>>` 续行；危险清单 16 → 28 条（服务 / 注册表 / 计划任务 / 账户 / ACL / 执行策略），`Remove-Item -Force` 也算。
+  - **ISSUE-013**：`exit` 事件加 `reason: 'bridge' | 'expect'`，断言失败带 `stepIndex` + `note`，档案 `summary.panes` 同记 `reason`；Web 与 CLI 按 `reason` 选文案，`✗ failed exit=-` 与「一律叫桥侧报错」都消失。
+  - **ISSUE-014 / 015**：`/api/runs` 不再泄漏存储用的 `kind`（解构摘掉，不整行 spread）；导入的 title 保留全文、id 按词边界截断。
+  - **ISSUE-016**：`ui:multi` 的 008 段先 `scrollIntoView` 再量矩形——片段库涨到 27 条后目标卡片落到 y=864（视口 768），鼠标事件在视口外等于没发。
+  - 用例：`test:expect` 28 → 40、`test:import` 41 → 60、冒烟 59 → 66；`npm test` 退出码 0，`ui:multi` 49 / `ui:history` 26 / `ui:queue` 全过。服务经桥重启加载新代码。

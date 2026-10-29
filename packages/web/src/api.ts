@@ -59,6 +59,8 @@ export type RunEvent =
       durationMs?: number
       stepIndex?: number
       timedOut?: boolean
+      /** 失败来源：桥侧报错 / 断言未命中（界面据此选文案） */
+      reason?: 'bridge' | 'expect'
       note?: string
       target?: string
       targetIndex?: number
@@ -92,6 +94,7 @@ export type RunListItem = {
     exitCode?: number
     durationMs?: number
     timedOut?: boolean
+    reason?: 'bridge' | 'expect'
     note?: string
   }[]
   eventCount: number

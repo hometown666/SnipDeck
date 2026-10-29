@@ -14,6 +14,7 @@ import {
   resolveVars,
   runSnippet,
   writePlan,
+  type RunEvent,
 } from '@snipdeck/core'
 import { createDriver, ExecDriver } from '@snipdeck/drivers'
 
@@ -71,6 +72,18 @@ function previewCmd(snippet: ReturnType<SnippetStore['get']> & object, vars: Rec
   const { values } = resolveVars(snippet, vars)
   // 预览用容错渲染：缺变量时保留 {{x}}，别让「看一眼最终命令」变成一次异常
   return snippet.steps.filter((s) => s.do === 'run').map((s) => renderTolerant(s.cmd, values))
+}
+
+/**
+ * 失败结局的一句话说明。
+ * 三种失败长得完全不一样：桥报错（退出码还是 0）、断言没命中（压根没有退出码）、
+ * 命令自己返回非 0。以前一律打印「桥侧报错」，断言失败也被说成桥的问题（ISSUE-013）。
+ */
+function exitText(ev: Extract<RunEvent, { type: 'exit' }>): string {
+  if (ev.timedOut) return `超时被终止${ev.note ? ` · ${ev.note}` : ''}`
+  if (ev.reason === 'expect') return `断言未命中 · ${ev.note ?? '未命中'}`
+  if (ev.reason === 'bridge') return `桥侧报错（退出码 ${ev.exitCode ?? 0}）`
+  return `failed exit=${ev.exitCode ?? '-'}`
 }
 
 async function main(): Promise<void> {
@@ -163,11 +176,7 @@ async function main(): Promise<void> {
             break
           case 'exit':
             failed = !ev.ok
-            console.log(
-              failed
-                ? `✗ ${ev.timedOut ? '超时被终止' : ev.note ? `桥侧报错（退出码 ${ev.exitCode ?? 0}）` : `failed exit=${ev.exitCode ?? '-'}`}`
-                : `✓ done ${ev.durationMs}ms`,
-            )
+            console.log(failed ? `✗ ${exitText(ev)}` : `✓ done ${ev.durationMs}ms`)
             break
           case 'error':
             failed = true
@@ -260,7 +269,9 @@ async function main(): Promise<void> {
               break
             case 'exit':
               // exit 在档案里每个目标一条，用 target 标出来，否则多目标时分不清谁收尾了
-              console.log(`${ev.ok ? '✓' : '✗'} ${ev.target ?? ''} ${ev.ok ? 'done' : 'failed'} ${ev.durationMs}ms`)
+              console.log(
+                `${ev.ok ? '✓' : '✗'} ${ev.target ?? ''} ${ev.ok ? 'done' : exitText(ev)} ${ev.durationMs}ms`,
+              )
               break
           }
         }

@@ -176,7 +176,7 @@ data/
 ## 测试
 
 ```bash
-npm test     # typecheck + 队列串行 + 命令保真度 + 搜索语义 + expect + 历史导入 + API 冒烟（59 项）
+npm test     # typecheck + 队列串行 + 命令保真度 + 搜索语义 + expect + 历史导入 + API 冒烟（66 项）
 ```
 
 单项：
@@ -185,8 +185,8 @@ npm test     # typecheck + 队列串行 + 命令保真度 + 搜索语义 + expec
 npm run test:queue  --workspace @snipdeck/drivers  # 队列必须真串行（command.txt 单车道）
 npm run test:cmd    --workspace @snipdeck/drivers  # 临时 .bat 的命令语义保真度
 npm run test:search --workspace @snipdeck/core     # 中文子串 / 多词 AND / 大小写与空白（14 项）
-npm run test:expect --workspace @snipdeck/core     # expect 三源 / 正则 flags / 轮询等待（28 项）
-npm run test:import --workspace @snipdeck/core     # 历史清洗 / 残句识别 / 危险标记 / 不覆盖（41 项）
+npm run test:expect --workspace @snipdeck/core     # expect 三源 / 编码 / 正则预算 / 轮询等待（40 项）
+npm run test:import --workspace @snipdeck/core     # 历史清洗 / 残句识别 / 危险标记 / 不覆盖（60 项）
 npm run smoke       --workspace @snipdeck/server   # 打真路由：鉴权 / 404 / 脱敏 / 真 SSE 执行
 npm run ui:shot -- http://127.0.0.1:7878/ 390 844 data/tmp/ui.png   # 移动端仿真截图 + 布局测量
 npm run ui:queue                                   # 顶栏「排队 N」徽标可见性（需服务 + 桥都在线）

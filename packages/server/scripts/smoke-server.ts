@@ -141,6 +141,19 @@ writeFixture(
     '',
   ].join('\n'),
 )
+// 断言失败：失败原因（未匹配哪条正则）必须跟在 exit 事件上，而不是只留在上一条 step 里
+writeFixture(
+  'snippets/测试/expect-miss.yaml',
+  [
+    'id: expect-miss',
+    'title: 断言必失败',
+    'target: win-desktop',
+    'steps:',
+    "  - { do: run, cmd: 'ping -n 1 127.0.0.1' }",
+    '  - { do: expect, match: never-appears-\\d+ }',
+    '',
+  ].join('\n'),
+)
 
 const { app, store } = buildApp({
   dataDir: FIXTURE,
@@ -213,7 +226,7 @@ const hb = h.json()
 check('GET /api/health → 200', h.statusCode === 200)
 check('health.ok === true', hb.ok === true)
 check('health.bridgeUp 是布尔值', typeof hb.bridgeUp === 'boolean', JSON.stringify(hb))
-check('health.snippets = 6（7 条里 1 条重复）', hb.snippets === 6, JSON.stringify(hb))
+check('health.snippets = 7（8 条里 1 条重复）', hb.snippets === 7, JSON.stringify(hb))
 check('health.quarantined = 1', hb.quarantined === 1, JSON.stringify(hb))
 
 // 3. 列表与单个
@@ -359,7 +372,29 @@ check(
 // ping -n 3 约 2s，两条串行应 ≥ 3.5s（并行会接近 2s）
 check('多目标总耗时 ≈ 单条 × 2（确实没并发）', multiWall >= 3500, `${multiWall}ms`)
 
-// 8c. 运行档案（P4）：断开 SSE 之后还能回看这次跑了什么
+// 8c. 断言失败的结局要带原因（ISSUE-013）
+{
+  const r = await app.inject({ method: 'POST', url: '/api/run', headers: auth, payload: { id: 'expect-miss' } })
+  const evs2 = parseEvents(r.body)
+  const ex = evs2.find((e) => e.type === 'exit')
+  check(
+    'expect 失败 → exit.reason = expect',
+    ex?.reason === 'expect',
+    JSON.stringify(ex),
+  )
+  check(
+    'expect 失败 → exit.note 带未匹配的正则',
+    typeof ex?.note === 'string' && /未匹配/.test(ex.note),
+    JSON.stringify(ex?.note),
+  )
+  check(
+    'expect 失败 → exit.stepIndex 指向断言步',
+    ex?.stepIndex === 1,
+    JSON.stringify(ex?.stepIndex),
+  )
+}
+
+// 8d. 运行档案（P4）：断开 SSE 之后还能回看这次跑了什么
 // 先跑一条带 secret 的片段，用来验「secret 值不进档案」
 await app.inject({ method: 'POST', url: '/api/run', headers: auth, payload: { id: 'secret-demo' } })
 
@@ -371,7 +406,7 @@ type RunItem = {
   varsRedacted?: string[]
   ok: boolean
   durationMs?: number
-  panes: { target: string; ok: boolean }[]
+  panes: { target: string; ok: boolean; reason?: string; note?: string }[]
   eventCount: number
 }
 const runsList = (
@@ -391,6 +426,27 @@ check(
   typeof multiRun?.ok === 'boolean' && (multiRun?.durationMs ?? 0) > 0 && (multiRun?.eventCount ?? 0) > 0,
   JSON.stringify({ ok: multiRun?.ok, dur: multiRun?.durationMs, n: multiRun?.eventCount }),
 )
+// ISSUE-014：行里的 `kind` 是存储标记，不属于 RunMeta，整行 spread 会把它漏进接口
+check(
+  '列表项不带存储用的 kind 字段',
+  runsList.every((r) => !('kind' in (r as unknown as Record<string, unknown>))),
+  JSON.stringify(Object.keys(runsList[0] ?? {})),
+)
+check(
+  '列表项带的是 RunMeta 的字段（snippetId / startedAt / caller）',
+  !!multiRun?.snippetId && typeof multiRun?.startedAt === 'number' && !!multiRun?.caller,
+  JSON.stringify(Object.keys(multiRun ?? {})),
+)
+
+// 断言失败的档案：结局里要能看出是「断言未命中」，不是「桥报错」
+const missRuns = (
+  await app.inject({ method: 'GET', url: '/api/runs?snippet=expect-miss', headers: auth })
+).json() as RunItem[]
+check(
+  '档案 summary 记下 reason=expect 与未匹配原因',
+  missRuns[0]?.panes[0]?.reason === 'expect' && /未匹配/.test(missRuns[0]?.panes[0]?.note ?? ''),
+  JSON.stringify(missRuns[0]?.panes[0]),
+)
 
 const detail = (
   await app.inject({ method: 'GET', url: `/api/runs/${multiRun?.runId}`, headers: auth })
@@ -401,6 +457,12 @@ const detail = (
 }
 check('GET /api/runs/:runId → meta + events + summary', detail.meta.runId === multiRun?.runId && detail.events.length > 0 && !!detail.summary, JSON.stringify(Object.keys(detail)))
 check('详情事件数与列表一致', detail.events.length === multiRun?.eventCount, `${detail.events.length} vs ${multiRun?.eventCount}`)
+check(
+  '详情 meta 不带存储用的 kind 字段',
+  !('kind' in (detail.meta as unknown as Record<string, unknown>)) &&
+    !('kind' in ((detail.summary ?? {}) as unknown as Record<string, unknown>)),
+  JSON.stringify(Object.keys(detail.meta)),
+)
 check(
   'start 事件带 runId（前端据此回链档案）',
   detail.events.find((e) => e.type === 'start')?.runId === multiRun?.runId,

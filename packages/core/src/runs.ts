@@ -36,6 +36,8 @@ export type RunPaneResult = {
   exitCode?: number
   durationMs?: number
   timedOut?: boolean
+  /** 失败来源：桥侧报错 / 断言未命中（档案里也要能一眼分清） */
+  reason?: 'bridge' | 'expect'
   note?: string
 }
 
@@ -138,9 +140,17 @@ export class RunLog {
         // 半行（进程被 kill 时最后一行没写完）直接跳过，前面的照读
         continue
       }
-      if (row.kind === 'meta') meta = row as unknown as RunMeta
-      else if (row.kind === 'event') events.push(row.ev as RunEvent)
-      else if (row.kind === 'summary') summary = row as unknown as RunSummary
+      // 行里的 `kind` 是**存储用**的标记，不属于 RunMeta / RunSummary——
+      // 整行 spread 出去会让列表项多出一个类型上不存在的 `kind:"meta"`，
+      // 前端拿到后只能当脏字段忽略。这里按字段挑，不按行 spread。
+      if (row.kind === 'meta') {
+        const { kind: _kind, ...rest } = row
+        meta = rest as unknown as RunMeta
+      } else if (row.kind === 'event') events.push(row.ev as RunEvent)
+      else if (row.kind === 'summary') {
+        const { kind: _kind, ...rest } = row
+        summary = rest as unknown as RunSummary
+      }
     }
     if (!meta) return null
     return { meta, events, summary }

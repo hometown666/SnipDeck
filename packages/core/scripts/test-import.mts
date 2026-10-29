@@ -59,7 +59,28 @@ check(
 check('丢弃计数 = 7（3 空行含时间戳 + ls + cd .. + 重复 + abc）', dropped === 7, String(dropped))
 check('首尾空白被 trim', kept[2] === 'Restart-Service TermService -Force', JSON.stringify(kept[2]))
 
-// 1b. 多行命令被 PSReadLine 拆开后只剩半条，不能导
+// 1b. 控制台转录带进来的提示符（ISSUE-011）
+{
+  const prompt = normalizeHistory([
+    'PS C:\\Users\\Kakyo George> Get-Date',
+    'PS D:\\试炼之地\\remote text control> npm test',
+    '>>  Set-Item -Path a -Value b',
+    '>>  }',
+  ])
+  check(
+    'PS 提示符被剥掉，命令留下',
+    prompt.kept.join('|') === 'Get-Date|npm test',
+    JSON.stringify(prompt.kept),
+  )
+  check('>> 续行提示符整条丢弃', prompt.dropped === 2, String(prompt.dropped))
+  check(
+    '剥过前缀的行不再以 PS 开头',
+    prompt.kept.every((c) => !c.startsWith('PS ')),
+    JSON.stringify(prompt.kept),
+  )
+}
+
+// 1c. 多行命令被 PSReadLine 拆开后只剩半条，不能导
 check(
   '未闭合花括号 → 不完整（多行被截断的第一半）',
   looksIncomplete('Get-NetFirewallRule | Where-Object {$_.DisplayName -like "*RDP*"'),
@@ -89,8 +110,21 @@ const dangers: [string, boolean][] = [
   ['shutdown /s /t 0', true],
   ['git reset --hard HEAD~3', true],
   ['taskkill /f /im notepad.exe', true],
+  // ISSUE-012：服务 / 注册表 / 计划任务 / 账户 / ACL 的写操作，历史里常有一键生效的
+  ['Restart-Service TermService -Force', true],
+  ['Set-Service -Name Spooler -StartupType Disabled', true],
+  ["Set-ItemProperty 'HKLM:/SYSTEM/x' -Name Start -Value 0", true],
+  ['New-ItemProperty -Path HKCU:/x -Name y -Value 1', true],
+  ['reg add HKLM\\Software\\x /v y /d 1 /f', true],
+  ['schtasks /create /tn x /tr y /sc daily', true],
+  ['net user admin2 P@ss /add', true],
+  ['icacls C:\\x /grant Everyone:F', true],
+  ['takeown /f C:\\Windows', true],
+  ['bcdedit /set testsigning on', true],
+  ['Set-ExecutionPolicy Bypass -Scope LocalMachine', true],
   ['netstat -ano | findstr 3389', false],
   ['Get-Service TermService', false],
+  ['Get-ItemProperty HKLM:/SOFTWARE/x', false],
   ['git status', false],
 ]
 for (const [cmd, want] of dangers) {
@@ -102,6 +136,19 @@ check('路径分隔符拍平成 -', slugify('type C:\\a b\\x.txt') === 'type-c-a
 check('中文保留', slugify('查看实例表') === '查看实例表', slugify('查看实例表'))
 check('全是符号时兜底为 cmd', slugify('\\\\/') === 'cmd', slugify('\\\\/'))
 check('长度截断到 40', slugify('a'.repeat(80)).length === 40, String(slugify('a'.repeat(80)).length))
+
+// 3b. 标题保留全文（截断过会让搜索命中不了，ISSUE-015）
+{
+  const long =
+    'Get-Content C:\\Windows\\System32\\winevt\\Logs\\Microsoft-Windows-TerminalServices-LocalSessionManager%4Operational.evtx -Tail 20'
+  const p = planImport({ lines: [long], snippetsDir: SNIPPETS, force: true })
+  const first = p.planned[0]
+  check('长命令的 title 是全文（没有 …）', first?.title === long, JSON.stringify(first?.title))
+  check('title 里仍有被人搜的词 Terminal', /Terminal/.test(first?.title ?? ''))
+  // id = 'hist-' + slug(≤40)，所以上限是 45
+  check('id 长度 ≤ 45（hist- 前缀 + 40 字符 slug）', (first?.id.length ?? 99) <= 45, String(first?.id.length))
+  check('id 不以 - 结尾（不留半截词）', !(first?.id ?? 'x').endsWith('-'), first?.id)
+}
 
 // 4. 规划：id 唯一 + limit 取尾部
 const lines = ['dir C:\\a', 'dir C:/a', 'echo one', 'echo two', 'echo three']

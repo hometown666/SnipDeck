@@ -235,6 +235,130 @@ async function main(): Promise<void> {
     check('from 支持 {{var}} 渲染', r.steps[1]?.type === 'step' && r.steps[1].ok === true, JSON.stringify(r.steps[1]))
   }
 
+  // 10a. file: 源要认编码——桥写的文件是 UTF-16 LE + BOM（ISSUE-009）
+  {
+    // 有 BOM：桥的 instances.txt / last_result.txt / status.txt 都是这个形态
+    const le = join(FIXTURE, 'utf16le-bom.txt')
+    writeFileSync(le, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('实例 wechat#1 就绪\r\n', 'utf16le')]))
+    const r1 = await collect(
+      snippet([
+        { do: 'run', cmd: 'echo start' },
+        { do: 'expect', match: 'wechat#1', from: `file:${le}`, timeout: 1 },
+      ]),
+      fakeDriver({}),
+    )
+    check('UTF-16 LE + BOM 的实例表能匹配上', r1.steps[1]?.type === 'step' && r1.steps[1].ok === true, JSON.stringify(r1.steps[1]))
+
+    // 无 BOM：靠「每隔一个字节是 0」的字节分布判出来
+    const le2 = join(FIXTURE, 'utf16le-nobom.txt')
+    writeFileSync(le2, Buffer.from('listening on 7878\r\n', 'utf16le'))
+    const r2 = await collect(
+      snippet([
+        { do: 'run', cmd: 'echo start' },
+        { do: 'expect', match: 'listening', from: `file:${le2}`, timeout: 1 },
+      ]),
+      fakeDriver({}),
+    )
+    check('无 BOM 的 UTF-16 LE 也能匹配', r2.steps[1]?.type === 'step' && r2.steps[1].ok === true, JSON.stringify(r2.steps[1]))
+
+    // BE 的 BOM 也要能读（换端字节序，不是原样当 LE 解）
+    const be = join(FIXTURE, 'utf16be-bom.txt')
+    const leBuf = Buffer.from('done ok\r\n', 'utf16le')
+    const beBuf = Buffer.from(leBuf)
+    beBuf.swap16()
+    writeFileSync(be, Buffer.concat([Buffer.from([0xfe, 0xff]), beBuf]))
+    const r3 = await collect(
+      snippet([
+        { do: 'run', cmd: 'echo start' },
+        { do: 'expect', match: 'done ok', from: `file:${be}`, timeout: 1 },
+      ]),
+      fakeDriver({}),
+    )
+    check('UTF-16 BE + BOM 也能匹配（字节序换回来）', r3.steps[1]?.type === 'step' && r3.steps[1].ok === true, JSON.stringify(r3.steps[1]))
+
+    // GBK：桥在 936 代码页下写的中文，按 UTF-8 解会得到替换字符
+    const gbk = join(FIXTURE, 'gbk.txt')
+    writeFileSync(gbk, Buffer.from([0x44, 0x3a, 0x5c, 0xb3, 0xcc, 0xd0, 0xf2, 0x0d, 0x0a]))
+    const r4 = await collect(
+      snippet([
+        { do: 'run', cmd: 'echo start' },
+        { do: 'expect', match: '程序', from: `file:${gbk}`, timeout: 1 },
+      ]),
+      fakeDriver({}),
+    )
+    check('GBK 中文文件能匹配（UTF-8 解坏后回退 GBK）', r4.steps[1]?.type === 'step' && r4.steps[1].ok === true, JSON.stringify(r4.steps[1]))
+  }
+
+  // 10b. CRLF 不该毁掉 `^...$` 锚点（桥写出来的文件全是 CRLF）
+  {
+    const crlf = join(FIXTURE, 'crlf.txt')
+    writeFileSync(crlf, 'booting\r\nlistening on 7878\r\n', 'utf8')
+    const r = await collect(
+      snippet([
+        { do: 'run', cmd: 'echo start' },
+        { do: 'expect', match: '^listening on \\d+$', flags: 'm', from: `file:${crlf}`, timeout: 1 },
+      ]),
+      fakeDriver({}),
+    )
+    check('CRLF 下 ^…$ 仍命中（换行被统一成 LF）', r.steps[1]?.type === 'step' && r.steps[1].ok === true, JSON.stringify(r.steps[1]))
+  }
+
+  // 10c. 灾难性回溯不许把进程/服务拖死（ISSUE-010）
+  {
+    const d = fakeDriver({ 'echo slow': `${'a'.repeat(30)}b` })
+    const t0 = Date.now()
+    const r = await collect(
+      snippet([
+        { do: 'run', cmd: 'echo slow' },
+        { do: 'expect', match: '(a+)+$' },
+      ]),
+      d,
+    )
+    const ms = Date.now() - t0
+    const st = r.steps[1]
+    check('回溯爆炸被预算截断（<2s 返回）', ms < 2000, `${ms}ms`)
+    check(
+      'note 写明「执行超时 / 灾难性回溯」而不是「未匹配」',
+      st?.type === 'step' && /灾难性回溯/.test(st.note ?? ''),
+      st?.type === 'step' ? (st.note ?? '') : '',
+    )
+    check('超时 → exit false', r.exit?.type === 'exit' && r.exit.ok === false)
+  }
+
+  // 10d. 断言失败的 exit 要自带原因（ISSUE-013）
+  {
+    const d = fakeDriver({ 'echo hi': 'no such slot' })
+    const r = await collect(
+      snippet([
+        { do: 'run', cmd: 'echo hi' },
+        { do: 'expect', match: 'slot=\\w+' },
+      ]),
+      d,
+    )
+    const ex = r.exit
+    check('exit.reason = expect', ex?.type === 'exit' && ex.reason === 'expect', JSON.stringify(ex))
+    check('exit.note 带未匹配的正则', ex?.type === 'exit' && /未匹配/.test(ex.note ?? ''), JSON.stringify(ex))
+    check('exit.stepIndex 指向断言步', ex?.type === 'exit' && ex.stepIndex === 1, JSON.stringify(ex))
+  }
+
+  // 10e. 文件读不到时的 note 要说清是「不可读」而不是「未匹配」
+  {
+    const log = join(FIXTURE, 'no-such-dir', 'x.log')
+    const r = await collect(
+      snippet([
+        { do: 'run', cmd: 'echo start' },
+        { do: 'expect', match: 'x', from: `file:${log}`, timeout: 0.3, interval: 50 },
+      ]),
+      fakeDriver({}),
+    )
+    const st = r.steps[1]
+    check(
+      'note 写明「文件仍不可读」',
+      st?.type === 'step' && /不可读/.test(st.note ?? ''),
+      st?.type === 'step' ? (st.note ?? '') : '',
+    )
+  }
+
   // 10. 校验层：坏的正则 / 坏的 from 在加载时就 quarantine
   {
     const bad = validateSnippet({

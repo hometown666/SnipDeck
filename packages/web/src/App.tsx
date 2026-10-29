@@ -29,7 +29,9 @@ type Pane = {
   durationMs?: number
   exitCode?: number
   timedOut?: boolean
-  /** 失败但退出码为 0 时的说明（桥 ERR| 前缀） */
+  /** 失败来源：桥侧报错 / 断言未命中。文案据此选，不再靠 note 有没有值去猜 */
+  reason?: 'bridge' | 'expect'
+  /** 失败的具体说明（桥报错原因、未匹配的正则、等了多久…） */
   note?: string
 }
 type Output = {
@@ -90,7 +92,8 @@ function paneStatus(p: Pane, now: number): string {
   if (p.running) return `运行中 ${fmtDur(now - p.startedAt)}`
   if (p.ok) return `完成 ${fmtDur(p.durationMs)}`
   if (p.timedOut) return '超时'
-  if (p.note) return `失败 · 桥侧报错 · ${fmtDur(p.durationMs)}`
+  if (p.reason === 'expect') return `失败 · 断言未命中 · ${fmtDur(p.durationMs)}`
+  if (p.reason === 'bridge') return `失败 · 桥侧报错 · ${fmtDur(p.durationMs)}`
   return `失败${p.exitCode != null ? ` exit=${p.exitCode}` : ''}${p.durationMs != null ? ` · ${fmtDur(p.durationMs)}` : ''}`
 }
 
@@ -116,7 +119,7 @@ function applyEvent(o: Output, ev: RunEvent): Output {
   if (!pane) return o
 
   const extra: Line[] = []
-  let { running, ok, durationMs, timedOut, exitCode, note } = pane
+  let { running, ok, durationMs, timedOut, exitCode, reason, note } = pane
   switch (ev.type) {
     case 'start':
       if (ev.cmd) extra.push({ kind: 'cmd', text: ev.cmd })
@@ -139,6 +142,7 @@ function applyEvent(o: Output, ev: RunEvent): Output {
       durationMs = ev.durationMs
       timedOut = ev.timedOut
       exitCode = ev.exitCode
+      reason = ev.reason
       note = ev.note
       extra.push({
         kind: 'step',
@@ -147,9 +151,11 @@ function applyEvent(o: Output, ev: RunEvent): Output {
           ? `done ${ev.durationMs}ms`
           : ev.timedOut
             ? '超时被终止（命令可能仍在桌面会话里跑）'
-            : ev.note
-              ? `桥侧报错（退出码 ${ev.exitCode ?? 0}）`
-              : `failed exit=${ev.exitCode ?? '-'}`,
+            : ev.reason === 'expect'
+              ? `断言未命中 · ${ev.note ?? ''}`
+              : ev.reason === 'bridge'
+                ? `桥侧报错（退出码 ${ev.exitCode ?? 0}）`
+                : `failed exit=${ev.exitCode ?? '-'}`,
       })
       break
     case 'error':
@@ -167,6 +173,7 @@ function applyEvent(o: Output, ev: RunEvent): Output {
     durationMs,
     exitCode,
     timedOut,
+    reason,
     note,
   }
   return {
@@ -201,6 +208,7 @@ function replayOutput(d: RunDetailView): Output {
         durationMs: sum?.durationMs,
         exitCode: sum?.exitCode,
         timedOut: sum?.timedOut,
+        reason: sum?.reason,
         note: sum?.note,
         lines: [],
       }
