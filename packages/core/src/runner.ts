@@ -9,6 +9,13 @@ export type RunOpts = {
   defaultShell?: string
 }
 
+/**
+ * 桥的失败约定：`ahk.bat` 出错时打印 `ERR|...` 但**退出码仍是 0**
+ * （只有参数错误才返回 1/2）。只看 exitCode 会把「slot not found」
+ * 显示成「完成」，所以这里额外看输出首行前缀。
+ */
+const BRIDGE_ERR = /^ERR\|/m
+
 export async function* runSnippet(
   snippet: Snippet,
   driver: Driver,
@@ -42,6 +49,7 @@ export async function* runSnippet(
     let ok = false
     let exitCode: number | undefined
     let timedOut = false
+    let bridgeErr = false
     try {
       const cmd = renderString(step.cmd, values)
       for await (const ev of driver.run({
@@ -56,6 +64,7 @@ export async function* runSnippet(
           exitCode = ev.exitCode
           timedOut = !!ev.timedOut
         } else {
+          if (ev.type === 'stdout' && BRIDGE_ERR.test(ev.data)) bridgeErr = true
           yield ev
         }
       }
@@ -63,9 +72,12 @@ export async function* runSnippet(
       yield { type: 'error', stepIndex: i, message: e instanceof Error ? e.message : String(e) }
     }
 
-    yield { type: 'step', stepIndex: i, ok, exitCode, durationMs: Date.now() - s0 }
+    const note = ok && bridgeErr ? '输出以 ERR| 开头（桥侧失败但退出码为 0）' : undefined
+    if (bridgeErr) ok = false
+
+    yield { type: 'step', stepIndex: i, ok, exitCode, durationMs: Date.now() - s0, note }
     if (!ok && !step.optional) {
-      yield { type: 'exit', ok: false, exitCode, durationMs: Date.now() - t0, timedOut }
+      yield { type: 'exit', ok: false, exitCode, durationMs: Date.now() - t0, timedOut, note }
       return
     }
   }

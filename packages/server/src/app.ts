@@ -62,6 +62,10 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
 
   app.addHook('onRequest', async (req, reply) => {
     if (!token || isLoopback(req.ip)) return
+    // 静态壳（/、/assets/*、manifest、sw.js、favicon）免 token：它们自身不含任何数据，
+    // 数据全在 /api 后面。把首屏也挡成 401 会让手机拿不到 HTML → 没有 ⚙ 按钮 →
+    // token 无处填写 → 永远 401，即「要页面先过 token，要 token 先有页面」（ISSUE-001）。
+    if (!req.url.startsWith('/api/')) return
     const auth = req.headers.authorization ?? ''
     if (auth === `Bearer ${token}`) return
     return reply.code(401).send({ error: 'unauthorized' })
@@ -175,8 +179,14 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
     // 只让前端路由回退到 index.html；/api/* 的未知路径必须返回 JSON 404，
     // 否则前端拿到一段 HTML 会当成成功响应去 JSON.parse。
     app.setNotFoundHandler((req, reply) => {
-      if (req.url.startsWith('/api/')) {
-        return reply.code(404).send({ error: `no such endpoint: ${req.url}` })
+      const path = req.url.split('?')[0] ?? req.url
+      if (path.startsWith('/api/')) {
+        return reply.code(404).send({ error: `no such endpoint: ${path}` })
+      }
+      // 带扩展名的静态资源找不到就是找不到，别回退成 index.html——
+      // 否则 /favicon.ico 会拿到 200 + 一段 HTML，浏览器把 HTML 当图标。
+      if (/\.[a-z0-9]+$/i.test(path)) {
+        return reply.code(404).type('text/plain; charset=utf-8').send('Not Found')
       }
       return reply.sendFile('index.html')
     })

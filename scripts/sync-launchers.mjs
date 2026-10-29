@@ -34,6 +34,11 @@ const LAUNCHERS = {
     run: 'python run.py',
     note: '回译教练，默认 8642',
   },
+  'snipdeck.bat': {
+    cwd: 'D:\\试炼之地\\remote text control',
+    run: 'call npm run dev:server',
+    note: 'SnipDeck 服务（前台，日志直接打在窗口里；默认 127.0.0.1:7878）',
+  },
 }
 
 mkdirSync(outDir, { recursive: true })

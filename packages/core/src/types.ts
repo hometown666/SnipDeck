@@ -60,7 +60,15 @@ export type RunEvent =
   | { type: 'queued'; stepIndex: number; waitedMs: number }
   | { type: 'stdout'; stepIndex: number; data: string }
   | { type: 'stderr'; stepIndex: number; data: string }
-  | { type: 'step'; stepIndex: number; ok: boolean; exitCode?: number; durationMs?: number }
+  | {
+      type: 'step'
+      stepIndex: number
+      ok: boolean
+      exitCode?: number
+      durationMs?: number
+      /** 失败但退出码为 0 时的说明（桥用 `ERR|` 前缀报错，见 runner） */
+      note?: string
+    }
   | {
       type: 'exit'
       ok: boolean
@@ -69,6 +77,8 @@ export type RunEvent =
       stepIndex?: number
       /** 被驱动超时杀掉（区别于命令自己返回非 0） */
       timedOut?: boolean
+      /** 失败但退出码为 0 时的说明 */
+      note?: string
     }
   | { type: 'error'; stepIndex?: number; message: string }
 

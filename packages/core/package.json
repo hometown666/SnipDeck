@@ -9,10 +9,10 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "minisearch": "^7.1.1",
     "yaml": "^2.6.1"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:search": "tsx scripts/test-search.mts"
   }
 }

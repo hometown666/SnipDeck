@@ -137,13 +137,15 @@ async function main(): Promise<void> {
             process.stderr.write(ev.data.endsWith('\n') ? ev.data : ev.data + '\n')
             break
           case 'step':
-            console.log(`✓ step${ev.stepIndex} exit=${ev.exitCode ?? '-'} ${ev.durationMs}ms`)
+            console.log(
+              `${ev.ok ? '✓' : '✗'} step${ev.stepIndex} exit=${ev.exitCode ?? '-'} ${ev.durationMs}ms${ev.note ? ' · ERR' : ''}`,
+            )
             break
           case 'exit':
             failed = !ev.ok
             console.log(
               failed
-                ? `✗ ${ev.timedOut ? '超时被终止' : `failed exit=${ev.exitCode ?? '-'}`}`
+                ? `✗ ${ev.timedOut ? '超时被终止' : ev.note ? `桥侧报错（退出码 ${ev.exitCode ?? 0}）` : `failed exit=${ev.exitCode ?? '-'}`}`
                 : `✓ done ${ev.durationMs}ms`,
             )
             break
