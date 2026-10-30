@@ -275,7 +275,7 @@ npm run ui:shot -- http://127.0.0.1:7878/ 390  844  data/tmp/ui-mobile-regress.p
 - 手机多目标要纵向滚动才能在两个 pane 间切换，没做「tab 切换」形态。
 - CLI 不支持 `--targets`。
 - 队列徽标仍是「长度」不是「第几位」（P2 §18 遗留，要做得多目标一起排位次）。
-- 跨机并列（真并发）仍等 P5 的 ssh 驱动；`home-win` / `vps` 继续灰显。
+- 跨机并列（真并发）仍等 P5 的 ssh 驱动；`home-win` / `vps` 继续灰显。（**2026-10-30 后补**：跨机并列已废弃，改由 P5 终端的多个会话承担，见 [06-terminal.md](06-terminal.md) §23.2。）
 - ~~两列并列时每块 pane 右裁 56px~~ **已修**（`.drawer.multi` 宽改 `min(1320px, calc(100vw - 48px))`，1366 每块 631 > 605）：见 §0.5 ISSUE-006。**仍存在**：**三列必然横滚**（`605*3+84 = 1899`，1366 屏物理放不下），这是取舍不是缺陷。
 - **超过 8 个目标时前端不拦**，服务端 400 后仍开 N 块空面板、错误串裸露 JSON。见 §0.5 ISSUE-007。
 
@@ -339,4 +339,60 @@ npm run ui:shot -- http://127.0.0.1:7878/ 390  844  data/tmp/ui-mobile-regress.p
 - 片段 CRUD / Raw 编辑 API 仍未做：改片段只能改文件（`fs.watch` 会热更）。
 
 **复验补修（2026-10-30 凌晨）**：P4 真跑复验又挖出 8 条，全部已修，现场与修法见 §0.7 / §0.8。值得一提的是两条根因都不在「逻辑写错」，而在**输入假设**：桥的文件是 UTF-16 LE（不是 UTF-8），正则执行是不可中断的同步调用（所以 `timeout` 形同虚设）。
+
+---
+
+## 30. P5.1 实施记录：终端骨架（2026-10-30）
+
+> 编号说明：§23 原是旧 P5.1（local 驱动）的实施记录，那一期已于 10-30 全量撤回并废弃，编号不复用；P5 的新设计与验收在 [06-terminal.md](06-terminal.md)（§23–§29），实施记录从这里继续。
+
+**这一期做了什么**
+
+| 块 | 具体 |
+|---|---|
+| 会话内核 | `packages/server/src/sessions.ts`：`Session`（`node-pty` 承载的 ConPTY + 200KB 环形回滚 + 订阅者集合）+ `SessionManager`（create / get / list / remove / disposeAll / reapOrphans） |
+| WS 通道 | `packages/server/src/terminal-ws.ts`：挂 `app.server` 的 `upgrade` 事件，**手工校验 token**（不进 `onRequest` hook、无 loopback 豁免），`handleUpgrade` 后走 `ready / output / exit / error` ↔ `input / resize / ping` |
+| REST | `POST /api/sessions`（201）、`GET /api/sessions`、`DELETE /api/sessions/:id`；`shell` 走白名单（`powershell` / `cmd` / `pwsh`） |
+| 前端 | `TerminalApp.tsx` + `components/Tabs.tsx`：顶栏「片段 / 终端」两个 tab，`/terminal` 独立路由，`xterm` + `fit` + `ResizeObserver`，会话条（新建 / 切换 / 关闭） |
+| 回收 | 三条路径：无订阅者 60s 宽限、空闲 30min、启动时扫 `data/tmp/sessions/*.json` 对残留 PID 做 `taskkill /T`（先用 `tasklist` 核映像名，防 PID 复用误杀） |
+| 测试 | `test:session` **27 条**（REST 7 / WS 5 / 鉴权 2 / 回收 4 / 宽限期 2 / 清残留 4 / 无 token 3），已串进 `npm test` |
+
+**验收实测**
+
+| 项 | 结果 |
+|---|---|
+| `npm test` | 全绿：check:ps1 3 个合格、queue 14、cmd 40、expect 60、smoke 66、session **27** |
+| `test:session` 耗时 | **3.4s**（真起 PTY、真 listen、真 taskkill） |
+| 桌面 1366×768 | `.xterm` 挂上；填充率 横向 1.004 / 纵向 0.995（xterm 按字符格取整，1.0 是理想值）；徽标「已连接」；`echo TERM_PROBE` 回显 + 结果都在；页面无横向溢出 |
+| 手机 390×844 | 同上通过，纵向填充率 0.993；顶栏四个元素与三件会话控件都不换行、不溢出 |
+| 体积 | 主包 `index.js` 170.03KB（gzip **55.92KB**，P2.5 是 52.61，+3.3KB）；终端 `TerminalApp.js` 340.42KB（gzip 87.30KB）**懒加载**；CSS 同样拆成 13.09KB + 7.75KB |
+| 会话回收 | DELETE 后目标 PID 从 `tasklist` 消失；「创建了没人连」在宽限期后自行退出（用 `graceMs=800` 的短版验，不真等 60s） |
+
+**与设计/直觉不一样的取舍**
+
+1. **没配 `SNIP_TOKEN` 就没有终端，本机也一样。** 三条 REST + WS 全部 403。这不是洁癖：WS 的 `upgrade` 不进 hook，一旦留 loopback 豁免，反代转进来的请求就等于 remote shell。代价是本机用终端前得在 `.env` 里填个 token——与片段页「本机免 token」不一致，是有意为之。
+2. **终端页必须懒加载，CSS 也要拆。** 第一版把 `xterm` 打进主包，JS 从 52.6KB 涨到 **509.72KB**（gzip 142.84），手机打开片段页要多下 87KB。改成 `React.lazy` + 独立 `terminal.css` 后，主包只涨 3.3KB。
+3. **`ready` 必须先于任何 `output`。** 天真写法是先 attach 再发 `ready`，那样 attach 与 `ready` 之间的增量会先到，前端再用 `replay` 覆盖一次，屏幕顺序就乱了。现在做法是「同步取快照 → attach → 发 ready → 补发缓冲」——同一轮事件循环内完成，pty 回调插不进来。
+4. **kill 走 `taskkill /F /T`，不用 `p.kill()`。** 后者内部 fork `conpty_console_list_agent` 去 `AttachConsole`，服务把 stdout 重定向到日志文件时必然抛 `AttachConsole failed`（§28 实测过）。另加 3s 兜底：taskkill 成功但句柄不回收时，把状态标成 exited，别让界面永远转圈。
+5. **会话不进 `Driver` 接口。** 这是 06-terminal.md §23 定的调子，落代码时也确实没有一处复用 `RunRequest` / `RunEvent`——两边唯一的交集是「输出解码」，而 PTY 输出本来就是 UTF-8，连这个都用不上。
+6. **`childEnv()` 摘掉 `SNIP_TOKEN`。** 终端里一句 `echo $env:SNIP_TOKEN` 就能把服务凭据打出来，而那个凭据同时是别的设备进 `/api` 的钥匙。子进程只拿到其余环境变量。
+
+**踩到的坑：定时器里删文件把服务删崩了（ISSUE-018）**
+
+第一版 `removePidRecord` 用 `fs.rmSync`，在一次真机验证中被环境的删除守卫拦下并抛错；调用栈在 `setInterval` 的回调里 → `uncaughtException` → **整个服务直接退出**，日志里连一条正常报错都没有。
+
+修法三条，都在 `sessions.ts`：
+
+- `removePidRecord` 改 `unlinkSync` + 全吞异常（pid 记录删不掉最坏是下次启动多扫一个文件）；
+- `idleTimer` 的回调整体 `try/catch`（一次回收失败不该拿整个服务赔）；
+- `reapOrphans` 里三处 `rmSync` 一并换成 `safeUnlink`。
+
+**已知缺口**
+
+- 只有本机；SSH 会话（`ssh2` 的 `shell()`）在 P5.3。
+- 没有断线重连：WS 一断就是「连接已断开」，要手动点会话重连（P5.2）。刷新页面能接上，靠的是服务端 60s 宽限 + `replay`，不是前端重连。
+- 手机软键盘弹起后的 `resize` 没在真机验过（headless 没有软键盘），只在 CDP 尺寸切换下验了 `ResizeObserver`。
+- 会话数没有上限：连点「+ 新建」能开出任意多个 PTY，每个都是一个真 powershell。要做上限得先定「几个算多」。
+- `pwsh` 在没装 PowerShell 7 的机器上创建会 500（错误信息带出来了，但界面只是弹一条 alert）。
+- 关页面→60s 回收这条只在短 `graceMs` 下验过，没有真等 60s 走一遍端到端。
 

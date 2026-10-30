@@ -21,6 +21,8 @@ import {
   type Snippet,
 } from '@snipdeck/core'
 import { createDriver, ExecDriver } from '@snipdeck/drivers'
+import { isKnownShell, knownShells, SessionManager } from './sessions'
+import { attachTerminalWs } from './terminal-ws'
 
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url))
 
@@ -39,6 +41,7 @@ export type BuiltApp = {
   store: SnippetStore
   hosts: Hosts
   runs: RunLog
+  sessions: SessionManager
   dirs: { data: string; snippets: string; tmp: string; runs: string }
 }
 
@@ -108,6 +111,19 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
   // 启动清一次：只按时间不够，调试期一天能跑出上百条，500 个文件上限兜底
   const runs = new RunLog(runsDir, { maxFiles: 500, ttlDays: 30 })
   runs.prune()
+
+  // ——— 终端会话（P5.1）———
+  // 会话不落库、不进 runs/：服务重启即消失，能留的只有「上一轮残留的子进程」这条线索。
+  const sessions = new SessionManager({
+    pidDir: resolve(tmpDir, 'sessions'),
+    cwd: REPO_ROOT,
+  })
+  // 不 await：启动不该被 taskkill 拖住，几毫秒后自己跑完
+  void sessions.reapOrphans()
+  attachTerminalWs({ app, sessions, token })
+  app.addHook('onClose', async () => {
+    sessions.disposeAll()
+  })
 
   app.addHook('onRequest', async (req, reply) => {
     if (!token || isLoopback(req.ip)) return
@@ -314,6 +330,45 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
     return d
   })
 
+  // ——— P5.1 终端会话 ———
+  // 三条路由与 WS 共用一条规矩：**没有 SNIP_TOKEN 就没有终端**。
+  // 理由不是洁癖：WS 的 upgrade 没有 loopback 豁免（反代一转手就是 remote shell），
+  // 而 REST 若能建会话、WS 又连不上，只会得到一个半残状态。
+  const terminalDisabled = {
+    error: 'terminal disabled',
+    message: '终端需要 SNIP_TOKEN：WS 通道没有 loopback 豁免，没有 token 就无从校验来源。请在 .env 里设置 SNIP_TOKEN 后重启服务。',
+  }
+
+  app.get('/api/sessions', async (_req, reply) => {
+    if (!token) return reply.code(403).send({ ...terminalDisabled, shells: knownShells() })
+    return { enabled: true, shells: knownShells(), sessions: sessions.list() }
+  })
+
+  app.post<{ Body: { shell?: string; cols?: number; rows?: number } }>(
+    '/api/sessions',
+    async (req, reply) => {
+      if (!token) return reply.code(403).send(terminalDisabled)
+      const shell = String(req.body?.shell ?? 'powershell')
+      if (!isKnownShell(shell)) {
+        return reply
+          .code(400)
+          .send({ error: `unknown shell: ${shell}（可用：${knownShells().join(' / ')}）` })
+      }
+      try {
+        return reply.code(201).send(sessions.create({ shell, cols: req.body?.cols, rows: req.body?.rows }).snapshot())
+      } catch (e) {
+        // PTY 起不来（比如 pwsh 没装）不该 500 到前端就完事，把原因带出去
+        return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) })
+      }
+    },
+  )
+
+  app.delete<{ Params: { id: string } }>('/api/sessions/:id', async (req, reply) => {
+    if (!token) return reply.code(403).send(terminalDisabled)
+    if (!sessions.remove(req.params.id)) return reply.code(404).send({ error: 'session not found' })
+    return { ok: true }
+  })
+
   if (existsSync(webDist)) {
     app.register(fastifyStatic, { root: webDist })
     // 只让前端路由回退到 index.html；/api/* 的未知路径必须返回 JSON 404，
@@ -332,7 +387,14 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
     })
   }
 
-  return { app, store, hosts, runs, dirs: { data: dataDir, snippets: snippetsDir, tmp: tmpDir, runs: runsDir } }
+  return {
+    app,
+    store,
+    hosts,
+    runs,
+    sessions,
+    dirs: { data: dataDir, snippets: snippetsDir, tmp: tmpDir, runs: runsDir },
+  }
 }
 
 function publicView(s: Snippet, snippetsDir: string) {

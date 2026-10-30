@@ -1,4 +1,5 @@
 import type { HealthView } from '../api'
+import { Tabs } from './Tabs'
 
 /**
  * 顶栏：桥状态、队列徽标、刷新 / 历史 / 设置三个按钮。
@@ -25,6 +26,7 @@ export function Topbar({
         <span className="logo">{'{}'}</span>
         <span className="name">SnipDeck</span>
       </div>
+      <Tabs active="snippets" />
       <div className="topbar-right">
         <span className={`badge ${health?.bridgeUp ? 'up' : 'down'}`} title="AHK 桥状态">
           {health === null ? '…' : health.bridgeUp ? 'bridge up' : 'bridge down'}

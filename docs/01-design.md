@@ -18,7 +18,7 @@
 | 片段复用 | 只能粘进当前会话           | 变量渲染 + 一键执行 + 输出归档          |
 | 数据归属 | 存在它云端，导出困难         | 本地 YAML 文件，拷走即迁移，git 可 diff |
 | 执行能力 | 只会发 shell 命令       | 还能驱动桌面 GUI（走 ahk.bat）       |
-| 多目标  | 需要手工各连一遍           | 一条片段投多台，收并列结果（P3 已做「同目标多开」与并列面板；跨机要等 P5 的 ssh）           |
+| 多目标  | 需要手工各连一遍           | 一条片段投多台，收并列结果（P3 已做「同目标多开」与并列面板；跨机广播投放已废弃，改由 P5 终端多会话承担）           |
 | 手机体验 | App 内功能齐全但片段编辑难用   | PWA，点一下就跑，不依赖实时输入           |
 
 结论：不是要做一个「更好的 Termius」，是要做一个**片段优先**的工作台。v0.2 把这句话落到了实处：本期根本没有交互终端，只有片段 + 执行结果。
@@ -30,15 +30,15 @@
 **做**
 
 1. 片段库：YAML 文件为唯一真相（目录即分组），支持变量（含 `choices` 下拉）、多步动作、任意 `meta` 字段。
-2. 一类执行目标：**win-desktop（exec 驱动）**，统一到驱动接口下；local / ssh 目标在 hosts.yaml 中预留占位。
+2. 一类执行目标：**win-desktop（exec 驱动）**，统一到驱动接口下；`home-win` / `vps` 在 hosts.yaml 里继续占位但仍是 `reserved`（P5 的终端走自己的连接列表，不读 `target`）。
 3. 跨设备：同一份库、同一套主机配置，手机和笔记本看到的是同一个东西。
 4. CLI：`snip list|run|search|hosts|status|reindex`，任意 SSH 终端（包括 Termius）里都能用。
 5. Web/PWA：片段面板 + 变量表单 + 一键运行 + 输出查看 + 桥队列可视化。
 
 **不做（本期）**
 
-- 交互式终端（node-pty / xterm.js / WS）——P5 预留，接口不动。
-- ssh 驱动——P5 预留。
+- 交互式终端（node-pty / xterm.js / WS）——**P5 就是它**（见 06-terminal.md），P0–P4 不做。
+- ssh 的**片段执行**驱动——不做；P5 的 ssh 只做 shell channel，不跑片段。
 - 多用户 / 团队协作 / 权限分级（单用户假设，见 §11）。
 - 公网暴露（只走 Tailscale）。
 - 文件传输（SFTP）、端口转发图形化、跳板机链路。
@@ -79,21 +79,22 @@ WS 通道随交互终端一起移出（v0.1 有三条通道，现在两条）。
 
 ### 4.1 统一接口
 
-驱动不关心 UI，只回答三件事：能不能开交互会话、能不能无头跑、跑出来什么。
+驱动只回答一件事：**怎么把一条片段跑完，交出输出和退出码。**
 
 ```ts
 interface Driver {
   readonly kind: 'exec' | 'local' | 'ssh'
   describe(): DriverInfo            // 能力声明：{ pty, stream, gui, concurrent }
   run(req: RunRequest): AsyncIterable<RunEvent>
-  openSession?(opts: SessionOpts): Promise<Session>   // 仅 local/ssh（P5）
 }
 ```
 
 `RunRequest` 里带：片段、目标、渲染后的变量、步骤列表。  
 `RunEvent`：`{ type: 'start' | 'stdout' | 'stderr' | 'step' | 'exit' | 'error', ... }`。
 
-**要点**：UI 只认 `RunEvent`，不认驱动。本期只实现 exec；加 local/ssh = 加一个实现类，前端一行不改。
+**要点**：UI 只认 `RunEvent`，不认驱动。本期只实现 exec，`kind` 另外两个值留着是因为 `hosts.yaml` 里 `home-win` / `vps` 还占着位。
+
+> **没有 `openSession()`。** 2026-10-30 删掉了这个预留方法：它暗示终端会话可以长在驱动上，而实际模型不是——驱动一次性返回、有退出码；会话长驻、双向、没有退出码。P5 的终端在 `packages/server` 的 `SessionManager` 里，见 [06-terminal.md](06-terminal.md) §24。
 
 ### 4.2 exec 驱动（本期唯一实现）
 
@@ -130,25 +131,30 @@ ahk.bat 就是桥协议的客户端，exec 驱动通过它的子命令获得全�
 
 **v0.1 的结构化桥动词（`{op, slot, x, y}`）取消**——ahk.bat 的 CLI 就是接口，`do: run` 直接携带渲染后的命令行；Raw 模式下用户看到的即执行的，不搞结构化黑盒。
 
-### 4.4 预留：local 与 ssh（P5）
+### 4.4 P5：网页终端（会话不是驱动）
 
-- **local**：node-pty 起 powershell / cmd / Git Bash；交互模式 PTY 直通（届时 reintroduce WS + xterm.js）；无头模式已被 exec 驱动覆盖。激活条件：确实需要浏览器里的交互 shell，且 ConPTY 在计划任务会话里验证可用。
-- **ssh**：ssh2，密钥 / agent / 密码，`known_hosts` 校验；`exec` 无头、`shell` channel 交互。激活条件：要管 VPS / Linux 机器。到那时 `insert` / `send` 两个步骤动词一起实装。
-- 两者在 hosts.yaml 中占位（`reserved: true`），UI 灰显，fan-out 时跳过并提示。
+**2026-10-30 改**：P5 不再是「local / ssh 两个驱动」，而是**一个终端**。设计与验收全在 [06-terminal.md](06-terminal.md)，这里只留它与驱动层的边界。
+
+- **驱动**（`packages/drivers`）：只服务「片段执行」——一次性、整段返回、有退出码。本期仍然只有 `exec`。
+- **会话**（`packages/server` 的 `SessionManager`）：PTY / ssh 的 shell channel——长驻、流式、双向。它**不实现 `Driver` 接口**，也不参与 `RunRequest` / `RunEvent`。硬塞进去会让两个模型互相污染：一个要退出码，一个没有退出码。
+- **唯一共享**的是输出解码（BOM / UTF-8 合法性 / GBK 回退）。真需要时再抽，不预支。
+- `hosts.yaml` 里 `home-win` / `vps` 继续占位，但仍是 `reserved`——**终端不读 `target`，它有自己的一套连接列表**。
 
 ### 4.5 能力矩阵（这决定了片段怎么写）
 
-| 能力          | exec（本期）       | local（P5） | ssh（P5）   |
-| ----------- | -------------- | --------- | --------- |
-| 交互 PTY      | ❌              | ✅         | ✅         |
-| 流式 stdout   | ✅（整段收回）        | ✅         | ✅         |
-| 退出码         | ✅              | ✅         | ✅         |
-| 并发执行        | ❌ 单车道排队        | ✅         | ✅         |
-| 驱动 GUI / 键鼠 | ✅（经 ahk.bat）   | ❌         | ❌         |
-| 跨机器         | ❌（只本机桌面）       | ❌         | ✅         |
-| 运行前提        | listener 常驻且提权 | 无         | sshd + 密钥 |
+只有一列了，因为只有一种驱动：
 
-**推论**：想碰 GUI，`target` 必须指向 win-desktop，且天然不可移植到别的机器。这是物理限制，不试图抹平。P5 之后想「到处都能跑」的片段只写 POSIX 命令投 local / ssh。
+| 能力 | exec（唯一驱动） |
+|---|---|
+| 交互 PTY | ❌（终端是 P5 的独立页面，不是驱动） |
+| 流式 stdout | ✅（整段收回） |
+| 退出码 | ✅ |
+| 并发执行 | ❌ 单车道排队 |
+| 驱动 GUI / 键鼠 | ✅（经 ahk.bat） |
+| 跨机器 | ❌（只本机桌面） |
+| 运行前提 | listener 常驻且提权 |
+
+**推论**：想碰 GUI，`target` 必须指向 `win-desktop`，且天然不可移植到别的机器——这是物理限制，不试图抹平。片段只在本机跑；跨机器干活走 P5 的终端会话（开一个 tab），不是「把片段投过去」。
 
 ---
 
@@ -165,11 +171,11 @@ win-desktop:              # 本期唯一可用目标
   bridge: C:\ahk_trigger  # ahk.bat 所在目录
   timeout: 20
 
-home-win:                 # 预留（P5）：本机 shell，含交互 PTY
+home-win:                 # 占位：本机 shell（P5 终端有独立连接列表，不走 target）
   driver: local
   reserved: true
 
-vps:                      # 预留（P5）：远端 SSH
+vps:                      # 占位：远端 SSH（P5 终端用，不作为片段 target）
   driver: ssh
   host: 100.99.202.54
   reserved: true
@@ -206,7 +212,7 @@ steps:
 | `sleep`  | 等待                | `ms`                                  |
 | `expect` | 对文本做正则断言（不执行命令）   | `match`, `from`, `flags`, `timeout`, `interval`, `optional` |
 
-（`insert` / `send` 留给 P5 的交互会话。）
+（`insert` / `send` 已废弃：P5 的终端用 WS 直接写 PTY，不需要独立动词。）
 
 `expect` 的三种取文来源（`from`）：
 
@@ -294,17 +300,17 @@ run 是服务端行为：前端断开不影响执行（`send()` 见 `closed` 就
 - 「服务重启丢会话」这条风险随之消失；run 档案落盘，只能看不能接——本来也不接。
 
 
-### 6.3 多目标（P3 已实现，跨机并列留到 P5）
+### 6.3 多目标（P3 已实现；跨机并列已废弃）
 
 `POST /api/run` 接受 `targets: ["win-desktop", "win-desktop"]`：
 
 - **同一目标允许重复**：那是单机唯一能表达「多开」的方式，数组顺序 = 结果并列顺序；
 - **校验全在开流前**：空数组 / 非数组 / 未知目标 / 任一 `reserved` → `400`，整条拒绝（不做「跳过并标注」，因为一次请求只返回一条 SSE 流，半个成功最难解释）；
 - **事件逐条打标**：`{ ...event, target, targetIndex }`，前端按 `targetIndex` 分流到各自面板；
-- **并发拉起、串行执行**：服务端 `Promise.all` 同时启动 N 个 `runSnippet`，但它们共用同一个 `ExecDriver`（按 `bridgeRoot` 缓存）→ 全局串行队列，实际严格一个接一个。**P5 接 ssh 后这段不用改就是真并发**；
+- **并发拉起、串行执行**：服务端 `Promise.all` 同时启动 N 个 `runSnippet`，但它们共用同一个 `ExecDriver`（按 `bridgeRoot` 缓存）→ 全局串行队列，实际严格一个接一个。只有一种驱动，所以 N 路永远是排队，不是并发；
 - **上限 8 个**（`MAX_TARGETS`）：只是防呆，不是产品限制。
 
-> **P3 只做「同目标多开」**：数据模型、目标选择器、reserved 置灰、事件打标、结果并列都落地了，但可执行目标仍然只有 `win-desktop`，所以实际是「同一条片段在这台机器上排队跑 N 次」。真正的跨机并行要等 P5 的 ssh —— 见 §9 的执行顺序说明。
+> **P3 只做「同目标多开」**：数据模型、目标选择器、reserved 置灰、事件打标、结果并列都落地了，但可执行目标仍然只有 `win-desktop`，所以实际是「同一条片段在这台机器上排队跑 N 次」。**跨机并行已于 2026-10-30 废弃**——终端用「多个会话并排」满足同一诉求，不做命令行广播，见 [06-terminal.md](06-terminal.md) §26.2。
 
 ### 6.4 编码与中文（已知雷区）
 
@@ -338,7 +344,7 @@ run 是服务端行为：前端断开不影响执行（`send()` 见 `closed` 就
 | 手机   | PWA（manifest + service worker） | 加到主屏，复刻 TxtTunnel 的做法    |
 | 持久化  | 文件 + 内存索引                      | 数据可读可 diff；不上 SQLite     |
 
-v0.1 移出（进 P5）：node-pty、xterm.js、`ws`、ssh2。
+v0.1 移出、后由 P5 收回的四个依赖：node-pty、xterm.js、`ws`、ssh2——P5 **只把它们用在终端上**，不用于片段执行（ssh2 只开 shell channel，不用 `exec()`）。
 
 **从 TxtTunnel 只搬四件**：token 鉴权、配对二维码、PWA manifest、自启脚本。Cursor 相关的一律不带。
 
@@ -350,10 +356,10 @@ v0.1 移出（进 P5）：node-pty、xterm.js、`ws`、ssh2。
 remote text control/                 # 仓库根
 ├─ packages/
 │  ├─ core/         片段模型 · 变量渲染 · 索引 · 驱动注册表 · 类型
-│  ├─ drivers/      exec.ts（local.ts / ssh.ts 为 P5 占位）
+│  ├─ drivers/      exec.ts（唯一驱动；终端会话不进这里）
 │  ├─ cli/          snip list|run|search|hosts|status|reindex
-│  ├─ server/       Fastify 路由 · SSE · 静态托管
-│  └─ web/          Vite + React（PWA）
+│  ├─ server/       Fastify 路由 · SSE · 静态托管 ·（P5）SessionManager + WS
+│  └─ web/          Vite + React（PWA）·（P5）/terminal 路由
 │     ├─ App.tsx        状态编排（570 行；2026-10-30 从 1096 行拆出）
 │     ├─ types.ts       Pane / Output / Draft / MAX_TARGETS
 │     ├─ lib/run-events.ts  事件 → 面板的纯函数（可单测）

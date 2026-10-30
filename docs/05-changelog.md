@@ -131,3 +131,19 @@
   - **顺手挖到一个操作坑并写进 §16.1**：`Stop-ScheduledTask` 只结束任务本身的 powershell，**node 子进程不跟着死、继续占 7878**；此时 `Start-ScheduledTask` 会因 `EADDRINUSE` 静默退出（任务状态仍是 Running，但没有服务）。正确姿势是先 `Get-NetTCPConnection -LocalPort 7878` 确认端口空、必要时 `Stop-Process` 残留 PID，再 Start。重启电脑不受影响。
   - `.env` 维持 `127.0.0.1:7878` 且 `SNIP_TOKEN` 留空——**手机要能用还得改两处**（`SNIPDECK_HOST` 换成 Tailscale 地址 + 填 token），那会改变网络暴露面，没擅自做。
 
+- **v2.0**（2026-10-30，P5 重定义为网页终端 · 撤掉旧 P5 全部产出）：
+  - **P5 改性质**：从「驱动扩展」改为「**网页终端**」。旧四项作废——local 驱动（曾实装）、ssh exec 驱动 + 跨机并列、`insert`/`send` 动词、把 PTY 当 P5.4 子项。新方案 = 本机 ConPTY + SSH 会话 + WS + xterm，四段（P5.1 骨架 / P5.2 韧性 / P5.3 SSH / P5.4 片段宏）。新增 [06-terminal.md](06-terminal.md)（§23–§29），`02-roadmap.md` §9.1 改成摘要 + 指针。
+  - **撤回已实装的 local 驱动**：全部改动当时尚未提交（17 个已跟踪文件 + 4 个新增），整份 `git stash` 留档（`P5.1 local 驱动…仅留档`），工作区回到 P4。撤完 `npm test` 全绿。`test:queue` 首次跑因冷启动抖动误报（单条 2592ms → 并发/单条 = 1.615 < 1.7 阈值），单独重跑 2097 / 4164ms 通过——**这条断言偏脆**，已知未改。
+  - **前置验证三条全过**：node-pty 1.1.0 `npm install` **9s / 2 个包 / 零编译**（win32-x64 prebuild）；ConPTY 在 `SnipDeck-server` 同款 Principal（`Kakyo George` / `Interactive` / `Limited`）的临时任务里 `SPAWN=ok 62ms`；交互式会话写入到命中 **40ms**、`resize(100,30)` 正常；kill 后 `PING_AFTER=0`、`ORPHAN=NO`。脚本与数据在 `data/tmp/pty-probe/`（`RESULT.md`）。
+  - **两条环境事实入档**：服务实际跑 `D:\node.js Symllink\node.exe` **v22.17.1**（不是 PATH 里那个 22.22.2；两者 ABI 127 可互通，但换 Node 大版本会让 `.node` 失配）；WS 的 `upgrade` 不进 Fastify `onRequest` hook，终端必须单独鉴权且**不能有 loopback 豁免**。
+  - **已知噪音**：`node-pty` 的 `kill()` 会 fork `conpty_console_list_agent`，父进程没有控制台时抛 `AttachConsole failed`（服务把 stdout 重定向到日志正是这种情况）。功能不受影响，但会脏日志；处置定为走 `taskkill /F /T /PID`。
+
+- **v2.1**（2026-10-30，P5.1 终端骨架落地）：
+  - 新增 `packages/server/src/sessions.ts`：`Session`（`node-pty` 的 ConPTY + 200KB 环形回滚 + 订阅者）+ `SessionManager`（create / get / list / remove / disposeAll / reapOrphans），三条回收路径（无订阅者 60s 宽限 / 空闲 30min / 启动扫残留 PID 并 `taskkill /T`）。
+  - 新增 `packages/server/src/terminal-ws.ts`：挂在 `app.server` 的 `upgrade` 事件上，**手工校验 token、无 loopback 豁免**（进不了 `onRequest` hook）；协议 `ready / output / exit / error` ↔ `input / resize / ping`，`ready` 严格先于任何 `output`。
+  - 三条 REST：`POST /api/sessions` / `GET /api/sessions` / `DELETE /api/sessions/:id`；`shell` 白名单 `powershell` / `cmd` / `pwsh`。**没配 `SNIP_TOKEN` 时终端整体 403**，本机也一样。
+  - 前端：`TerminalApp.tsx` + `components/Tabs.tsx`，顶栏「片段 / 终端」两个 tab，`/terminal` 独立路由。终端页 **`React.lazy` 懒加载**（不这么做主包从 52.6KB 涨到 509.7KB）；CSS 同步拆成 `terminal.css`。最终主包 gzip **55.92KB**（+3.3），终端 chunk gzip 87.30KB 按需加载。
+  - `test:session` **27 条**进 `npm test`（REST 7 / WS 5 / 鉴权 2 / 回收 4 / 宽限期 2 / 清残留 4 / 无 token 3），耗时 3.4s。
+  - **修 ISSUE-018**：定时器里 `rmSync` 被环境删除守卫拦下 → `uncaughtException` → 服务直接退出。改 `safeUnlink`（吞异常）+ 整块 `try/catch`，删不掉临时文件不再等于服务故障。
+  - 真机实测：1366×768 填充率 1.004 × 0.995、390×844 纵向 0.993；两边都能敲 `echo TERM_PROBE` 并收到结果，无横向溢出。
+

@@ -1,0 +1,205 @@
+/* 终端页专属样式（P5.1）。
+   单独成文件是为了让它在懒加载 chunk 里——片段页不该为终端多下 5KB。
+   浅色站点里放一块深色终端：终端本来就是「页面里的一个窗口」，
+   强行套站点配色会让 ANSI 十六色全失准。 */
+
+.term-app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 0 14px 10px;
+}
+
+.term-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 0 8px;
+}
+
+.term-chip {
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.term-chip.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.term-chip-label {
+  padding: 4px 6px 4px 10px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.term-chip.on .term-chip-label {
+  color: var(--accent);
+}
+
+.term-chip-x {
+  padding: 4px 8px 4px 2px;
+  border: 0;
+  background: none;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.term-chip-x:hover {
+  color: var(--danger);
+}
+
+.term-shell,
+.term-new {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.term-new:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.term-new:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.term-meta {
+  margin-left: auto;
+  max-width: 40vw;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.term-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 7px 10px;
+  border: 1px solid #f0cfcf;
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.term-alert span {
+  flex: 1;
+}
+
+.term-host-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid #22252e;
+  border-radius: 10px;
+  background: #12141a;
+  overflow: hidden;
+}
+
+.term-host {
+  position: absolute;
+  inset: 0;
+  padding: 8px 10px;
+}
+
+.term-host .xterm {
+  height: 100%;
+}
+
+.term-gate {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  background: rgba(18, 20, 26, 0.94);
+  color: #e4e6eb;
+}
+
+.term-gate h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.term-gate p {
+  max-width: 560px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #a9adb8;
+}
+
+.term-gate-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.term-gate-row input {
+  flex: 1;
+  max-width: 380px;
+  padding: 8px 11px;
+  border: 1px solid #333742;
+  border-radius: 8px;
+  background: #1a1d24;
+  color: #e4e6eb;
+  font-size: 13.5px;
+}
+
+.term-gate-row button {
+  padding: 8px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.term-gate-hint {
+  font-size: 12px !important;
+  color: #7d8290 !important;
+}
+
+@media (max-width: 640px) {
+  .term-app {
+    padding: 0 10px 8px;
+  }
+
+  .term-meta {
+    display: none;
+  }
+
+  .term-host {
+    padding: 6px 8px;
+  }
+}

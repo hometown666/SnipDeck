@@ -110,6 +110,27 @@ export type RunDetailView = {
   } | null
 }
 
+/** `/api/sessions` 的一项：终端会话（P5.1） */
+export type SessionView = {
+  id: string
+  kind: 'local'
+  shell: string
+  cwd: string
+  cols: number
+  rows: number
+  createdAt: number
+  lastActiveAt: number
+  state: 'running' | 'exited'
+  exitCode?: number
+  attached: number
+}
+
+export type SessionsView = {
+  enabled: boolean
+  shells: string[]
+  sessions: SessionView[]
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -180,6 +201,14 @@ export const api = {
       `/api/runs?limit=${limit}${snippet ? `&snippet=${encodeURIComponent(snippet)}` : ''}`,
     ),
   runDetail: (runId: string) => req<RunDetailView>(`/api/runs/${encodeURIComponent(runId)}`),
+  sessions: () => req<SessionsView>('/api/sessions'),
+  createSession: (shell: string, cols: number, rows: number) =>
+    req<SessionView>('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ shell, cols, rows }),
+    }),
+  deleteSession: (id: string) =>
+    req<{ ok: boolean }>(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   preview: (id: string, vars: Record<string, string>) =>
     req<{ cmds: string[]; pending: string[]; missing: string[]; redacted: string[] }>(
       `/api/snippets/${encodeURIComponent(id)}/preview`,
@@ -225,4 +254,17 @@ export const api = {
         }
       }
     }),
+}
+
+/**
+ * 终端 WS 地址。
+ *
+ * token 只能走 query：浏览器的 WebSocket 构造函数不支持自定义 header。
+ * 服务端在 upgrade 阶段自己校验（不走 Fastify hook，也没有 loopback 豁免），
+ * 所以这里的 token 缺失就等于连不上——前端必须保证它非空。
+ */
+export function sessionWsUrl(id: string): string {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const token = encodeURIComponent(getToken())
+  return `${proto}//${location.host}/ws/session/${encodeURIComponent(id)}?token=${token}`
 }

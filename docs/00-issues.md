@@ -722,3 +722,45 @@ GBK 解码时 `ef bc` 先组成汉字 `锛`，剩下 `89` 成为孤字节，与�
 
 **关联**：§9 P0 的「计划任务方式起服务」、§16 运行与部署、`.editorconfig`、`.gitattributes`。
 
+---
+
+#### ISSUE-018：定时器里删一个 pid 文件，把整个服务删崩了（中）—— **已修 · 2026-10-30**
+
+**现场**：P5.1 首次真机验证，终端页正常跑完 `echo TERM_PROBE`、截图也拿到了。几秒后服务进程直接消失，日志最后一段是：
+
+```
+Error: [safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED]
+  {"count":1,"threshold":1,"scope":"turn","targets":["…\\data\\tmp\\sessions\\e4ae…json"]}
+    at SessionManager.removePidRecord (packages/server/src/sessions.ts:443:5)
+    at Timeout._onTimeout (packages/server/src/sessions.ts:413:18)
+    at listOnTimeout (node:internal/timers:585:17)
+```
+
+**根因**是两层，第二层才是真问题：
+
+1. 直接原因：`removePidRecord` 用 `fs.rmSync` 删 `data/tmp/sessions/<id>.json`，被运行环境的删除守卫拦下并抛错。
+2. **真 bug**：这次删除发生在 `setInterval` 的回调里。定时器回调抛异常没有调用者能接，直接变成 `uncaughtException` → 进程退出。**删不掉一个临时文件，代价是整个服务下线。**
+
+**为什么以前没暴露**：P0–P4 的清理都在启动路径上（`runs.prune()`、`sweepTmp()`），同步执行、有调用者兜着。P5.1 是第一个**在定时器里做删除**的地方。
+
+**修法**（都在 `packages/server/src/sessions.ts`）：
+
+- 新增 `safeUnlink()`：`unlinkSync` + 全吞异常；
+- `idleTimer` 回调整体包 `try/catch`；
+- `reapOrphans` 里三处 `rmSync` 一并换成 `safeUnlink`。
+
+**验收**：
+
+| 断言 | 结果 |
+|---|---|
+| `npm run test:session` | 27 条全过（3.4s） |
+| 改后再跑真机验证 | 终端页可用，`/api/sessions` 持续 200，日志无 `Error` |
+| 删除失败路径 | `safeUnlink` 吞掉异常，会话照常从列表移除 |
+
+**教训**：
+
+- **定时器回调必须自己兜底。** `setInterval` / `setTimeout` 里做的事要假设「任何一步都可能抛」，包 try/catch 不是防御性编程，是必要成本。
+- **删文件失败不该升级成服务故障。** pid 记录只是「服务被强杀后能多回收一个孤儿会话」的优化项，不是核心状态；它删不掉，最坏是下次启动多扫一个文件。
+
+**关联**：§30、`sessions.ts`、[06-terminal.md](06-terminal.md) §24.3。
+
