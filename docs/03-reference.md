@@ -100,7 +100,7 @@
 | 项 | 位置 / 命令 |
 |---|---|
 | 启动 | `powershell -File .\scripts\start-server.ps1`（读 `.env`，日志追加到 `data/logs/server.log`） |
-| 自启 | `powershell -File .\scripts\install-autostart.ps1`（登录时计划任务）；`-Uninstall` 卸载 |
+| 自启 | `powershell -File .\scripts\install-autostart.ps1`（登录时计划任务，**已注册 2026-10-30**，见 §16.1）；`-Uninstall` 卸载 |
 | 配置 | 复制 `.env.example` 为 `.env`（已 gitignore） |
 | 服务启动器 | `npm run sync:launchers` —— 生成 GBK 的 `%AHK_ROOT%\launchers\{hexo,txttunnel,backtrans}.bat`；`shell` 片段依赖它 |
 | Lint | `npm run lint`（eslint 9 flat config，`eslint.config.mjs`）。**只拦错不排格式**——没有 prettier，免得一次把 5000 行重排成没法 review 的 diff |
@@ -123,7 +123,7 @@
 >
 > **日志轮转**：`start-server.ps1` 启动前若 `server.log` 超过 5MB，改名成 `server.log.1`（只留一份）。轮转只能在启动前做——运行中日志句柄被 `cmd >>` 独占，改名必失败（脚本里已经 catch 掉，不阻塞启动）。
 
-### 16.1 自启：待办（2026-10-30 状态 —— 脚本已修好，**计划任务未注册**）
+### 16.1 自启：已安装（2026-10-30 08:04 注册并实测）
 
 `scripts/install-autostart.ps1` 注册的计划任务名是 **`SnipDeck-server`**：
 
@@ -135,9 +135,9 @@
 | 设置 | 电池上照跑、错过就补、失败 1 分钟重试 ×3、无执行时限 |
 | 权限 | 普通权限即可，只注册当前账户 |
 
-**为什么还没装**：这脚本到 2026-10-30 才第一次能跑（缺 BOM 导致它从来没法执行，见 §0.9 ISSUE-017）。注册会立刻拉起服务并改系统状态，等你点头。
+**安装记录（2026-10-30 08:04）**：脚本补 BOM 修好后注册成功。实测 `Get-ScheduledTask` → `State=Running`、`LogonType=Interactive`、`RunLevel=Limited`、`ExecutionTimeLimit=PT0S`、`LastTaskResult=267009`（0x41301 = 任务正在运行，不是错误）；`curl --noproxy '*' http://127.0.0.1:7878/api/health` 直接 200；日志里有 `[snipdeck] listening on http://127.0.0.1:7878`。
 
-**装之前先确认两件事**：
+**装之前先确认两件事**（下次重装照这个来）：
 
 1. **`.env` 里的 `SNIP_TOKEN` 填了没有** —— 空的话服务只监听 `127.0.0.1`，手机连不上（非 loopback 且无 token 时服务直接拒绝启动，§11）。
 2. **当前有没有手工起的实例** —— 脚本末尾会立刻 `Start-ScheduledTask`；日志句柄独占，第二个实例会自己退出。这是设计（顺带防止两个服务抢 `command.txt`），但看起来像「装失败」。
@@ -157,5 +157,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart.
 | `Get-ScheduledTask -TaskName 'SnipDeck-server'` | State = `Ready` 或 `Running` |
 | 注销重登后**不手动起服务** | `curl --noproxy '*' http://127.0.0.1:7878/api/health` 直接返回 `ok:true` |
 | `data/logs/server.log` | 有一条新的启动记录 |
+
+**手动重启服务的正确姿势**（2026-10-30 实测踩到）：
+
+`Stop-ScheduledTask` 只结束任务本身（那个 powershell），**它拉起的 node 子进程不跟着死，还占着 7878**。此时再 `Start-ScheduledTask`，新实例会因 `EADDRINUSE` 直接退出——任务状态看着是 Running，实际没有服务。正确顺序：
+
+```powershell
+Stop-ScheduledTask -TaskName 'SnipDeck-server'
+
+# 确认端口真的空了。有输出就意思是有残留，先 Stop-Process 掉那些 PID 再继续
+Get-NetTCPConnection -LocalPort 7878 -State Listen -ErrorAction SilentlyContinue
+
+Start-ScheduledTask -TaskName 'SnipDeck-server'
+```
+
+重启电脑不存在这问题（进程跟着系统走），这条只针对「手动 stop/start 任务」。
 
 **已知限制**：只管「登录后启动」，没登录不跑 —— 刻意的。真要「开机即跑」得配凭据跑 Session 0，那时 GUI 驱动就没意义了。

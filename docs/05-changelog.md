@@ -126,3 +126,8 @@
   - **死代码防回归**：`@typescript-eslint/no-unused-vars` 从 `warn` 升 `error` —— 之前 `history.ts` 里那个算出来没人用的 `shell` 能活着一整期，就是因为 warn 不会让 CI 变红。负例验证：临时写一个未使用变量，eslint 退非 0。
   - 顺手修 `check-ps1.ps1` 在 npm/CI 管道下的中文乱码（PowerShell 5.1 重定向时按 ANSI 写 stdout，改成 `[Console]::IsOutputRedirected` 时切 UTF-8，直接开窗口跑不受影响）。
 
+- **v1.10**（2026-10-30 08:04，自启装上 · 无代码改动）：
+  - **`SnipDeck-server` 计划任务已注册并实测**：`State=Running`、`LogonType=Interactive`、`RunLevel=Limited`、`ExecutionTimeLimit=PT0S`、`LastTaskResult=267009`（0x41301 = 正在运行，非错误）；`curl --noproxy '*' http://127.0.0.1:7878/api/health` 200；日志有 `listening on http://127.0.0.1:7878`。P0 那条「计划任务方式起服务」自此真正闭环——之前只是脚本存在。
+  - **顺手挖到一个操作坑并写进 §16.1**：`Stop-ScheduledTask` 只结束任务本身的 powershell，**node 子进程不跟着死、继续占 7878**；此时 `Start-ScheduledTask` 会因 `EADDRINUSE` 静默退出（任务状态仍是 Running，但没有服务）。正确姿势是先 `Get-NetTCPConnection -LocalPort 7878` 确认端口空、必要时 `Stop-Process` 残留 PID，再 Start。重启电脑不受影响。
+  - `.env` 维持 `127.0.0.1:7878` 且 `SNIP_TOKEN` 留空——**手机要能用还得改两处**（`SNIPDECK_HOST` 换成 Tailscale 地址 + 填 token），那会改变网络暴露面，没擅自做。
+
