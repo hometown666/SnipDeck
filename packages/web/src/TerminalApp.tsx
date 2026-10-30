@@ -3,7 +3,8 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import './terminal.css'
-import { ApiError, api, getToken, sessionWsUrl, setToken, type SessionView } from './api'
+import { ApiError, api, getToken, sessionWsUrl, setToken, type SessionView, type SnippetView } from './api'
+import { MacroPanel } from './components/MacroPanel'
 import { Tabs } from './components/Tabs'
 
 /**
@@ -78,6 +79,8 @@ export function TerminalApp() {
   const [tokenInput, setTokenInput] = useState('')
   const [size, setSize] = useState({ cols: 80, rows: 24 })
   const [ctrlArmed, setCtrlArmed] = useState(false)
+  const [macroOpen, setMacroOpen] = useState(false)
+  const [snippets, setSnippets] = useState<SnippetView[] | null>(null)
 
   const hostRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -483,6 +486,27 @@ export function TerminalApp() {
     termRef.current?.focus()
   }
 
+  /** 片段库只在第一次打开面板时拉，之后复用 */
+  const openMacro = useCallback(async () => {
+    setMacroOpen(true)
+    if (snippets) return
+    try {
+      setSnippets(await api.snippets())
+    } catch (e) {
+      setError(explain(e))
+    }
+  }, [snippets, explain])
+
+  /** 插入只写输入行；execute 才补一个回车（默认不执行，见 MacroPanel 的注释） */
+  const insertMacro = useCallback(
+    (cmd: string, execute: boolean) => {
+      sendInput(execute ? `${cmd}\r` : cmd)
+      setMacroOpen(false)
+      termRef.current?.focus()
+    },
+    [sendInput],
+  )
+
   const active = sessions.find((s) => s.id === activeId) ?? null
 
   return (
@@ -540,6 +564,14 @@ export function TerminalApp() {
         </select>
         <button className="term-new" disabled={busy} onClick={() => void create(shell)}>
           {busy ? '创建中…' : '+ 新建'}
+        </button>
+        <button
+          className="term-new"
+          onClick={() => void openMacro()}
+          title="从片段库插入一条命令到当前终端"
+          data-open-macro="1"
+        >
+          片段…
         </button>
         <span className="term-meta">
           {active ? `${size.cols}×${size.rows} · ${active.cwd}` : `${size.cols}×${size.rows}`}
@@ -599,6 +631,17 @@ export function TerminalApp() {
           </button>
         ))}
       </div>
+
+      {macroOpen ? (
+        <MacroPanel
+          snippets={snippets ?? []}
+          onInsert={insertMacro}
+          onClose={() => {
+            setMacroOpen(false)
+            termRef.current?.focus()
+          }}
+        />
+      ) : null}
     </div>
   )
 }

@@ -128,6 +128,242 @@
   color: var(--accent);
 }
 
+/* ——— 片段宏面板（P5.4）——— */
+
+.macro {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 92vw);
+  max-height: min(78vh, 720px);
+  padding: 16px 18px 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.14);
+  /* 详情态没有 .macro-list 那个可滚区域，内容超出时得整体滚——
+     否则手机上底部提示会被屏幕边缘切掉（390 实测踩过）。 */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.macro-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.macro-head h3 {
+  flex: 1;
+  margin: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.macro-back {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.macro-sub {
+  margin: 4px 0 10px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+.macro-search {
+  margin-bottom: 8px;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+  font: inherit;
+  font-size: 13.5px;
+}
+
+.macro-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.macro-group-name {
+  display: flex;
+  justify-content: space-between;
+  margin: 10px 0 4px;
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+}
+
+.macro-group-name em {
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.macro-item {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.macro-item:hover {
+  border-color: var(--border);
+  background: var(--bg);
+}
+
+.macro-item-title {
+  display: block;
+  overflow: hidden;
+  font-size: 13.5px;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.macro-item-meta {
+  display: block;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.macro-empty {
+  padding: 20px 0;
+  font-size: 13px;
+  color: var(--text-2);
+  text-align: center;
+}
+
+.macro-vars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.macro-var {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.macro-var span {
+  flex: none;
+  width: 34%;
+  overflow: hidden;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.macro-var input,
+.macro-var select {
+  flex: 1;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.macro-preview {
+  margin-bottom: 10px;
+}
+
+.macro-preview-label {
+  margin-bottom: 4px;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+.macro-preview-label em {
+  font-style: normal;
+  color: var(--accent);
+}
+
+.macro-preview pre {
+  max-height: 120px;
+  margin: 0;
+  padding: 9px 11px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.macro-bad {
+  margin-top: 6px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.macro-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.macro-primary,
+.macro-secondary {
+  flex: 1;
+  padding: 9px 12px;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.macro-primary {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.macro-secondary {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.macro-primary:disabled,
+.macro-secondary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.macro-hint {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
 .term-chip-x {
   padding: 4px 8px 4px 2px;
   border: 0;
@@ -281,5 +517,14 @@
 
   .term-host {
     padding: 6px 8px;
+  }
+
+  /* 手机上改成底部 sheet：全宽、上方圆角、避让 home indicator */
+  .macro {
+    width: 100%;
+    max-width: none;
+    max-height: 82vh;
+    border-radius: 18px 18px 0 0;
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
   }
 }

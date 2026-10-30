@@ -17,7 +17,7 @@
 - **`expect` 条件步**：片段里除了「跑」和「等」还能断言文本：`match` 正则 + `from`（上一步输出 / 全部输出 / 轮询一个文件）。等日志里出现 `Hexo is running at` 不再是 sleep 猜时长
 - **运行档案**：每次执行服务端落一份 `data/runs/<runId>.jsonl`（谁、在哪台、变量、逐条事件、结论）；顶栏 `🕘` 可以回看任意一次，关掉页面 / 网络断了都不丢
 - **从 shell 历史导入**：`snip import-history` 把 PSReadLine 历史里用过的命令一键变片段（默认 dry-run，危险命令自动标 `danger`）
-- **网页终端**（P5.1 / P5.2）：顶栏「终端」进 `/terminal`，在浏览器里开真 PTY（`powershell` / `cmd` / `pwsh`），手机也能敲。断线自动重连、刷新接回同一会话、底部一排 Esc/Tab/Ctrl/方向键。**必须配 `SNIP_TOKEN`**——WS 通道没有 loopback 豁免，没 token 就整个关掉。SSH 会话不做（2026-10-30 决定）
+- **网页终端**（P5.1 / P5.2 / P5.4）：顶栏「终端」进 `/terminal`，在浏览器里开真 PTY（`powershell` / `cmd` / `pwsh`），手机也能敲。断线自动重连、刷新接回同一会话、底部一排 Esc/Tab/Ctrl/方向键；工具条「片段…」可以把片段库里的命令渲染好插进终端（**不自动回车**，回车你自己按）。**必须配 `SNIP_TOKEN`**——WS 通道没有 loopback 豁免，没 token 就整个关掉。SSH 会话不做（2026-10-30 决定）
 
 > 多目标目前只有 `win-desktop` 一个可选项（`home-win` / `vps` 灰显）。
 > 「一条片段投多台机器」**不做**（2026-10-30 决定）；跨机器干活走 P5 的网页终端，开多个会话并排。数据结构和 UI 按 `targets[]` 铺好了，同目标多开照样能用。
