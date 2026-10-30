@@ -11,6 +11,7 @@
 - **一键执行**：实时输出（SSE 流），结束给退出码与耗时
 - **危险动作**：`danger: true` 的片段先确认，并可预览渲染后的最终命令行
 - **单车道队列**：`command.txt` 只能一条一条来，走桥的命令严格 FIFO，前端会显示排队时长
+- **网页里改片段**（P6）：顶栏 `＋` 新建（快捷键 `N`）、卡片右下角 `✎` 编辑（`E`）。结构化表单覆盖 vars / steps / meta 全字段；改 `id` 会自动搬文件；删除进 `snippets/.trash/`。编辑期间文件被别人改过会 409，不静默覆盖
 - **CLI**：任意 SSH 终端（Termius、手机、iPad）里 `snip run <id>`
 - **执行目标**：`win-desktop`（exec 驱动，经 `ahk.bat` 驱动桌面 GUI）
 - **多目标执行**：卡片右上角 `⊕` 打开目标选择器；**同一个目标可以重复添加**——只有一台可执行机器时，这就是「同目标多开」，结果在抽屉里并列成 N 块面板，事件按目标分流
@@ -104,7 +105,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-server.ps1
 
 ## 写一条片段
 
-放在 `data/snippets/<分组>/<名字>.yaml`，目录就是分组：
+放在 `data/snippets/<分组>/<名字>.yaml`，目录就是分组（也可以点网页顶栏 `＋` 新建）：
 
 ```yaml
 id: click-instance
@@ -150,6 +151,7 @@ steps:
 data/
 ├─ hosts.yaml          执行目标（driver / shell / 超时）
 ├─ snippets/**/*.yaml  片段，目录即分组
+├─ snippets/.trash/    删除片段的副本（*.yaml.txt，不会被当成片段加载）
 ├─ secrets.yaml        密钥（已 gitignore，可选）
 ├─ tmp/                复杂命令的临时 .bat（GBK，7 天后自动清）
 ├─ runs/               运行档案（jsonl，启动时留最近 500 份 / 30 天）
@@ -161,6 +163,7 @@ data/
 - **网络边界靠 Tailscale**，不要做公网端口映射
 - 对外监听必须设 `SNIP_TOKEN`，否则服务拒绝启动——这是「任意命令执行」的服务
 - token 只护 `/api/*`：静态壳（页面/JS/CSS/图标）免 token，否则手机拿不到页面也就没地方填 token。放行静态页的暴露面只有「一个空壳 UI」，数据与执行仍在 token 之后
+- **不按来源 IP 豁免**：只要设了 `SNIP_TOKEN`，本机访问 `/api/*` 同样要带 `Bearer`。反代（`tailscale serve`）会把远程请求从 `127.0.0.1` 转进来，按来源豁免等于把 token 关掉（2026-10-31 改，见 ISSUE-023）。没设 token 时服务只能绑 loopback，`server.ts` 启动时就拦住了
 - 密钥只写 `from: env:XXX` 或 `data/secrets.yaml`，不要内联进片段
 - `kill` / `admin:` 类片段请标 `danger: true`
 
@@ -177,7 +180,7 @@ data/
 ## 测试
 
 ```bash
-npm test     # typecheck + 队列串行 + 命令保真度 + 搜索语义 + expect + 历史导入 + API 冒烟（66 项）
+npm test     # typecheck + lint + ps1 编码 + 队列串行 + 命令保真度 + 搜索 + expect + 导入 + 会话 + API 冒烟（冒烟 94 项）
 ```
 
 单项：
@@ -190,9 +193,12 @@ npm run test:expect --workspace @snipdeck/core     # expect 三源 / 编码 / �
 npm run test:import --workspace @snipdeck/core     # 历史清洗 / 残句识别 / 危险标记 / 不覆盖（60 项）
 npm run smoke       --workspace @snipdeck/server   # 打真路由：鉴权 / 404 / 脱敏 / 真 SSE 执行
 npm run ui:shot -- http://127.0.0.1:7878/ 390 844 data/tmp/ui.png   # 移动端仿真截图 + 布局测量
+# 四个 ui:* 脚本都会从 .env 读 SNIP_TOKEN 注入页面；服务绑的是 100.x 时记得把地址传进去
+# ⚠️ 量布局请用 mobile: false（见 `npm run ui:editor`）：mobile: true 下 innerWidth 会落在真实窗口宽
 npm run ui:queue                                   # 顶栏「排队 N」徽标可见性（需服务 + 桥都在线）
 npm run ui:multi                                   # 多目标：目标选择器 + 并列面板（需服务在线）
 npm run ui:history                                 # 运行历史：列表 + 抽屉回放（需服务在线）
+npm run test:session-reap                          # 会话回收，**真 60 秒**两条路径（约 70s，不进 npm test）
 npm run lint                                       # eslint：只拦错，不排格式
 npm run check:ps1                                  # .ps1 必须 UTF-8 with BOM 且语法可解析（PS 5.1 的坑）
 npm run clean:tmp                                  # 清 data/tmp 里 7 天前的 .cmd 与 Chrome profile

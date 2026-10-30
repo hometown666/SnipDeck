@@ -1104,3 +1104,335 @@ body {
     font-size: 13px;
   }
 }
+
+/* ---------------- 片段编辑器（P6 CRUD） ---------------- */
+
+.modal.editor {
+  max-width: 760px;
+  max-height: 90vh;
+}
+
+@media (min-width: 1024px) {
+  /* 桌面上不学手机从底部升起：字段多，贴底会离视线太远 */
+  .modal.editor {
+    margin: auto;
+    border-radius: 18px;
+  }
+}
+
+.editor-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 12px;
+}
+
+.editor-grid .field {
+  margin-bottom: 10px;
+}
+
+.editor .field input,
+.editor .field select {
+  font-size: 14px;
+  padding: 8px 10px;
+}
+
+.editor textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.editor textarea.mono {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 2px 0 14px;
+}
+
+.check input {
+  margin: 0;
+}
+
+.mini-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.editor-section {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 4px;
+}
+
+/* 字段多的时候「保存」会被滚出视野。粘在底部——
+   编辑到一半发现要保存还得先滚到底，是个很小但每次都要付出的成本。 */
+.editor .modal-actions {
+  position: sticky;
+  bottom: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 10px 0 2px;
+  margin-top: 12px;
+}
+
+.editor-section h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.editor-section h4 em {
+  font-style: normal;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.editor-section h4 .btn.tiny {
+  margin-left: auto;
+}
+
+.editor-hint {
+  font-size: 12px;
+  color: var(--text-2);
+  margin: 0 0 8px;
+}
+
+.editor-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1.4fr 0.9fr 1.1fr auto auto;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.editor-row.tight {
+  grid-template-columns: 1fr 1fr;
+  margin: 6px 0 0;
+}
+
+/* timeout / flags 这类短字段不该跟命令正文一样宽 */
+.editor-row.tight input {
+  max-width: 240px;
+}
+
+.editor-row.meta {
+  grid-template-columns: 0.7fr 1fr auto;
+  align-items: start;
+}
+
+.editor-row input {
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.editor-row input.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.editor-step {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: var(--bg);
+}
+
+/* 可失败的步骤用虚线框：一眼能看出「这一步挂了不算整体失败」 */
+.editor-step.optional {
+  border-style: dashed;
+}
+
+.editor-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.editor-step-head strong {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.editor-step-head select {
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.btn.tiny {
+  padding: 4px 10px;
+  font-size: 12.5px;
+  border-radius: 8px;
+}
+
+.icon-btn.small {
+  width: 26px;
+  height: 26px;
+  font-size: 14px;
+}
+
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* 编辑入口：右下角，与右上角的 ⊕ 对角分开。
+   误触的代价是「打开编辑器」（可取消），不是「执行片段」，所以低透明度常显即可。 */
+.card-edit {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text-2);
+  opacity: 0.55;
+  border: 1px solid transparent;
+}
+
+.card-edit:hover {
+  opacity: 1;
+  color: var(--accent);
+  border-color: var(--border);
+  background: var(--bg);
+}
+
+@media (hover: hover) {
+  .card-edit {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .card:hover .card-edit,
+  .card:focus-within .card-edit {
+    opacity: 0.6;
+    pointer-events: auto;
+  }
+}
+
+/* 卡片第二行不能被右下角的 ✎ 压住 */
+.card-meta {
+  padding-right: 26px;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  background: #26251f;
+  color: #f2f1ea;
+  font-size: 13px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  z-index: 40;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  max-width: calc(100vw - 32px);
+}
+
+@media (max-width: 640px) {
+  /* 390 宽塞不下「品牌名 + 4 个按钮 + 状态徽标」：
+     不瘦身的话 tab 会被压到竖排（实测「片段」折成「片」/「段」两行）。
+     品牌名在手机上只留 `{}`，它本来也不承担导航作用。 */
+  .topbar .brand .name {
+    display: none;
+  }
+
+  .tabs {
+    margin-left: 6px;
+    gap: 0;
+  }
+
+  .tab {
+    white-space: nowrap;
+    padding: 4px 7px;
+    font-size: 12.5px;
+  }
+
+  .topbar-right {
+    gap: 4px;
+  }
+
+  .icon-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 14px;
+  }
+
+  .badge {
+    font-size: 10.5px;
+    padding: 2px 6px;
+  }
+
+  /* 变量行在 390 下是 2×3 网格：外面套个框，否则「secret ×」会飘在中间不像同一组 */
+  .editor-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .editor-row.meta {
+    grid-template-columns: 1fr auto;
+  }
+
+  .editor-step-head {
+    gap: 6px;
+  }
+
+  .editor-row:not(.tight):not(.meta) {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px;
+    row-gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .editor-row .icon-btn.small {
+    justify-self: end;
+  }
+
+  .editor-row .mini-check {
+    justify-self: start;
+  }
+}

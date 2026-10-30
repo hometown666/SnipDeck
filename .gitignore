@@ -17,6 +17,8 @@ data/logs/
 data/tmp/
 # run history jsonl
 data/runs/
+# 删除片段时的副本（CRUD 的回收站，扩展名是 .yaml.txt，不会被当成片段加载）
+data/snippets/.trash/
 
 # ============ dependencies and build ============
 node_modules/

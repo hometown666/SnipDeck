@@ -19,6 +19,7 @@ import { spawn, execSync } from 'node:child_process'
 import { existsSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { profileDir } from './lib/profile.mjs'
+import { primeToken } from './lib/token.mjs'
 
 const CANDIDATES = [
   process.env.CHROME_PATH,
@@ -115,6 +116,8 @@ function check(label, cond, extra = '') {
 }
 
 await send('Page.enable')
+// 方案 D 之后 /api 一律要 token（本机也不例外），不注入就只会截到 401 横幅
+await primeToken(send, url)
 
 /** 走一遍完整流程，返回观察到的 DOM 事实；viewport 决定并列还是堆叠 */
 async function drive(width, height, label) {

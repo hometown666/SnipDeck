@@ -29,7 +29,9 @@
     "test:expect": "npm run test:expect --workspace @snipdeck/core",
     "test:import": "npm run test:import --workspace @snipdeck/core",
     "ui:history": "node scripts/check-history.mjs",
-    "test:session": "npm run test:session --workspace @snipdeck/server"
+    "ui:editor": "node scripts/ui-editor.mjs",
+    "test:session": "npm run test:session --workspace @snipdeck/server",
+    "test:session-reap": "npm run test:session-reap --workspace @snipdeck/server"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

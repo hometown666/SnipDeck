@@ -41,7 +41,7 @@
 
 鉴权分两层：
 
-- **`/api/*`**：来源是 loopback 免 token；其余一律 `Authorization: Bearer $SNIP_TOKEN`，否则 401。
+- **`/api/*`**：**只要服务设了 `SNIP_TOKEN`，任何来源都要 `Authorization: Bearer $SNIP_TOKEN`，包括本机**。没有按来源 IP 的豁免（2026-10-31「方案 D」，见 ISSUE-023）。没设 token 时**不校验**——这条的安全性由 `server.ts` 的启动守卫兜底：无 token 只允许绑 loopback，所以那条分支只可能在本机直连的开发场景成立。
 - **静态壳**（`/`、`/assets/*`、`/manifest.webmanifest`、`/sw.js`、图标）：**一律免 token**。它们自身不含任何数据，数据全在 `/api` 后面；若连首屏也挡，手机就拿不到 ⚙ 去填 token，形成死锁（ISSUE-001）。带扩展名但文件不存在的路径返回 404 文本，不回退 `index.html`（否则 `/favicon.ico` 会拿到 200 + HTML）；不带扩展名的路径回退 `index.html` 供前端路由。
 
 | 方法 | 路径 | 入参 | 出参 / 语义 |
@@ -49,6 +49,10 @@
 | GET | `/api/health` | — | `{ok,bridgeUp,queue,snippets,quarantined}`；`bridgeUp` 有 30s 缓存与单飞去重 |
 | GET | `/api/snippets` | — | `SnippetView[]`（**不含**服务器文件路径） |
 | GET | `/api/snippets/:id` | — | `SnippetView`；不存在 404 |
+| GET | `/api/snippets/:id/detail` | — | 编辑器用：完整 `id/title/group/target/shell/tags/danger/meta/vars/steps` + `relPath`（相对 snippets 根）+ `mtimeMs`（冲突检测）；不存在 404 |
+| POST | `/api/snippets` | 完整片段对象（不含 `file`） | 201 `{ok,id,relPath,created,mtimeMs}`；校验失败 400（`problems[]` 逐条给原因）；id 或落点已存在 409 |
+| PUT | `/api/snippets/:id` | 同上 + `mtimeMs?` | 200 `{ok,id,relPath,renamed,mtimeMs}`；`body.id` 与 URL 不同即视作**改名**（文件跟着搬）；`mtimeMs` 与磁盘不符 409（不覆盖别人的改动） |
+| DELETE | `/api/snippets/:id` | — | 200 `{ok,id,backup}`；删除前先把副本放进 `snippets/.trash/<id>-<时间戳>.yaml.txt` |
 | POST | `/api/snippets/:id/preview` | `{vars}` | `{cmds,pending,missing,redacted}`；secret 渲染为 `***`；未填变量保留 `{{x}}` |
 | GET | `/api/hosts` | — | `{name,driver,reserved,default}[]` |
 | POST | `/api/run` | `{id,vars?,targets?,target?,confirm?}` | `text/event-stream`；每条事件带 `target` + `targetIndex`；首条 `start` 额外带 `runId` |
@@ -58,6 +62,19 @@
 `/api/run` 的目标入参优先级：`targets[]` > `target` > 片段 `target` > hosts 的 `default`。`targets[]` 里**同一目标可以重复**（同目标多开），最多 8 个。
 
 `/api/run` 的失败码都在**开流之前**判定：snippet 不存在 → 404；danger 未确认 / `targets` 非数组或为空 / 目标未知 / 目标 `reserved` → 400（多目标里**任一** reserved 就整条拒绝）。开流之后只剩 `error` 事件。
+
+**写入语义（POST / PUT / DELETE）**
+
+| 规矩 | 为什么 |
+|---|---|
+| 落点 = `snippets/<group>/<id>.yaml`；`group` 留空落 `未分组/` | 目录与 `groupOf()` 的兜底文案一致，文件不会散在根目录、界面却显示一个不存在的分组 |
+| `id` 与 `group` 都过 `safeSegment`：`<>:"/\|?*.` 与控制字符换成 `_`，Windows 保留名（`con`/`nul`/`com1`…）加前缀，截断 60 字 | id 同时是 URL 片段与文件名，两边都得能过；`.` 一起换掉是为了让 `..` 不可能出现在任何路径段里 |
+| 落点再经 `relative()` + `sep` 判一次越界 | `safeSegment` 是第一道闸，这是第二道（判据写成本身也踩过坑，见 ISSUE-021） |
+| `id` 全库唯一（写前扫一遍索引） | 同一 id 住两个目录时 `loadSnippets()` 只留先加载的那份、另一份 quarantine——界面看着正常，实际「改了没生效」（ISSUE-022） |
+| 原子写（同目录 `.tmp` → rename） | store 的 watcher 200ms 后重建索引，半份文件会让整条片段 quarantine |
+| 写前 `validateSnippet`，序列化后再 `parseDocument` 自检一遍 | 存进去一份语法错的 YAML 比拒绝保存糟糕得多；`stringify` 成功不等于能读回来 |
+| 覆盖已有文件前留 `<file>.bak`；删前留 `.trash/*.yaml.txt` | 手滑一次就没有退路，代价只是一个文件。`.yaml.txt` 不匹配 `loadSnippets()` 的后缀，不会被当成片段 |
+| 写后立刻 `store.reindex()` | 不等 watcher 的 200ms 去抖，否则「保存成功」之后马上 GET 可能还是旧索引 |
 
 ## 15. 事件与片段字段参考
 

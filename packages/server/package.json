@@ -20,7 +20,8 @@
     "start": "tsx src/server.ts",
     "smoke": "tsx scripts/smoke-server.ts",
     "typecheck": "tsc --noEmit",
-    "test:session": "tsx scripts/test-session.mts"
+    "test:session": "tsx scripts/test-session.mts",
+    "test:session-reap": "tsx scripts/test-session-reap.mts"
   },
   "devDependencies": {
     "@types/ws": "^8.18.2"

@@ -14,7 +14,7 @@
 
 > 编号约定：从这里起统一用 `ISSUE-xxx`，不再分「BUG」与「缺口」两套号。理由——两者的共同点是**计划承诺了、当前做不到**，区别只在来源：bug 是写错了，缺口是没写完。分两套号会让「哪些还没补」散在两处。原 BUG-001 沿用 ISSUE-001。
 >
-> **队列约定（2026-10-29 起）**：issue **只往队尾追加**，编号永不复用、不重排、不插队。新发现的 issue 接在当前最大号之后（下一个是 `ISSUE-005`）。修好的：标题行「**未修**」改「**已修 · YYYY-MM-DD**」，「状态」行写明改了什么、哪个测试兜住；**现场记录原样保留不删**——它同时是回归用例的说明书。修到一半的写「**修中**」。issue 与其修复计划成对出现：正文在 §0.2/§0.3，计划在 §0.4。
+> **队列约定（2026-10-29 起）**：issue **只往队尾追加**，编号永不复用、不重排、不插队。新发现的 issue 接在当前最大号之后（下一个是 `ISSUE-026`）。修好的：标题行「**未修**」改「**已修 · YYYY-MM-DD**」，「状态」行写明改了什么、哪个测试兜住；**现场记录原样保留不删**——它同时是回归用例的说明书。修到一半的写「**修中**」。issue 与其修复计划成对出现：正文在 §0.2/§0.3，计划在 §0.4。
 
 **状态**：**已修 · 2026-10-29**。守卫改为按路径分流——`/api/*` 仍需 Bearer，其余一律放行；`notFound` 对「带扩展名但文件不存在」返回 404 文本（`/favicon.ico` 不再被 SPA 回退成 HTML）。冒烟补 5 条（远端 `GET /` → 200 HTML、远端 `/assets/*.js` → 200、`/favicon.ico` → 404 非 HTML、`/some/spa/route` → 200 HTML、静态放行未顺带放行 `/api`），共 33 项。另用 `SNIPDECK_HOST=100.99.202.54 SNIP_TOKEN=…` 起了个 7879 临时实例，从 Tailscale 地址实测：`/` → 200 `text/html` 885B、无 token 打 `/api/snippets` → 401、带 token → 16 条列表、`/favicon.ico` → 404 `text/plain`。以下为原始现场记录，保留作回归说明书。
 
@@ -804,7 +804,7 @@ FST_ERR_CTP_EMPTY_JSON_BODY: Body cannot be empty when content-type is set to 'a
 
 ---
 
-#### ISSUE-020：会话该在 60s 后回收却没回收（中）—— **待观察 · 2026-10-30**
+#### ISSUE-020：会话该在 60s 后回收却没回收（中）—— **已验证 · 2026-10-31**（原始故障未复现，观察期继续）
 
 **现场**：真机测试结束时（23:14），一个 `cmd` 会话 `attached=0`、`state=running`，一直到 23:25 服务重启前都活着——**12 分钟**，而宽限期是 60 秒。它的子进程（PID 15124）也一直在，最后是被重启时的 `reapOrphans` 收掉的（这条链路本身工作正常）。
 
@@ -831,3 +831,93 @@ FST_ERR_CTP_EMPTY_JSON_BODY: Body cannot be empty when content-type is set to 'a
 
 **关联**：§30、§31、`sessions.ts`、[06-terminal.md](06-terminal.md) §24.3。
 
+
+---
+
+#### ISSUE-021：路径越界判据把合法目录名当成 `..`（低）—— **已修 · 2026-10-31**
+
+**现场**：P6 的穿越用例 `id: "../../evil"` 期望 201（清洗后落在 `snippets/` 内），实际回 400「落点越界」，而落点 `snippets/.._/.._.._evil.yaml` 明明在根目录内。
+
+**原因**：`assertInside` 写的是 `relative(root, file).startsWith('..')`。`safeSegment` 把 `/` 换成 `_` 之后，路径段变成了 `.._` —— 它以 `..` 开头，但那是个**合法的目录名**，不是上跳。判据把「像 `..` 的名字」和「真的是 `..`」混为一谈。
+
+**修复**：改成 `rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel)`，按路径段比而不是按字符串前缀比。同时 `safeSegment` 把 `.` 也替换成 `_`，让 `..` 根本不可能出现在任何段里——两道闸，各自独立。
+
+**教训**：**判「路径是否越界」必须按段比**。字符串前缀是最容易写、也最容易错的那一版；这类错还会「偏安全」地拒绝合法输入，所以不会有人立刻发现，直到某个用户的目录名恰好以两个点开头。
+
+**关联**：§33、`packages/core/src/snippet-write.ts`。
+
+---
+
+#### ISSUE-022：同一个 id 能在两个分组各存一份，改了不生效（中）—— **已修 · 2026-10-31**
+
+**现场**：冒烟里「POST 重复 id → 409」这条挂了 201。复现：先 `POST {id: 'smoke-new', group: '状态'}` 落成 `状态/smoke-new.yaml`；再 `POST {id: 'smoke-new'}`（不带 group）落成 `未分组/smoke-new.yaml`——两份同时存在。紧接着的 `PUT` 改名只搬走其中一份，另一份留在原地，索引里旧 id 还在。
+
+**原因**：第一版只检查「目标文件是否已存在」。id 的落点由 `group` 决定，换个 group 就是换文件，于是同一个 id 挂了两个文件。
+
+**为什么这个 bug 比看起来严重**：`loadSnippets()` 遇到重复 id 时保留先加载的那份、把另一份标成 quarantine。界面看起来完全正常（16 条还是 16 条），用户改的却可能是那份不生效的——**「保存成功」和「真的生效」之间隔着一个 quarantine**。
+
+**修复**：写盘前用 `idOwner()` 扫一遍索引，同一个 id 已住在别的文件里就 409，错误信息带出占用的相对路径。索引会漏掉已被 quarantine 的那份，所以「目标文件已存在」那道检查保留，两道一起用。
+
+**关联**：§33、`snippet-write.ts` 的 `idOwner()`、冒烟「POST 重复 id → 409」。
+
+---
+
+#### ISSUE-023：loopback 豁免让 `SNIP_TOKEN` 在反代后面形同虚设（高）—— **已修 · 2026-10-31**
+
+**现场**（代码审阅，非线上故障）：`app.ts` 的鉴权是 `if (!token || isLoopback(req.ip)) return`。第二个分支意味着**任何从 `127.0.0.1` 发起的请求都免 token**。
+
+`tailscale serve` / nginx 的工作方式正是「把远程请求从本机回环转进来」。一旦挂上反代，`req.ip` 就是 `127.0.0.1`，于是：
+
+- `SNIP_TOKEN` 看起来设了，实际只挡得住「绕过反代直连 7878」的人；
+- 反代背后整个 tailnet（含被临时分享的节点）可以 `POST /api/run` 执行任意命令；
+- 而这恰恰是唯一需要 token 的场景。
+
+**修复（方案 D）**：只删 `isLoopback` 那一半，保留 `!token`。
+
+- **有 token** → 所有来源都要 `Bearer`，本机也不例外；
+- **无 token** → 只能绑 loopback（`server.ts` 的启动守卫早就强制了这一点），本机开发零成本。
+
+不引入 `SNIPDECK_TRUST_LOOPBACK` 这类开关：**开关会被打开然后忘记关**，而忘了关正好回到修复前的状态。安全判据应该只有一个方向。
+
+**代价（接受）**：设了 token 之后，本机 `curl 127.0.0.1:7878/api/health` 也要带 `-H "Authorization: Bearer …"`。UI 脚本因此都要注入 token（新增 `scripts/lib/token.mjs`）。冒烟里「loopback 免 token」那条用例改成断言 401——它以前钉住的正是这个洞。
+
+**未做**：`SNIP_TOKEN` 为空 + 绑 loopback 的组合仍然完全无鉴权。这是有意的（单机开发场景），但如果将来要在同一台机器上跑多用户，这条得重新审。
+
+**关联**：`app.ts` 的 `onRequest`、`server.ts` 的启动守卫、§14 鉴权段、ISSUE-025 的 UI 脚本改造。
+
+---
+
+#### ISSUE-024：UI 回归脚本写「390」，实际量的是 427（中）—— **已修 · 2026-10-31**
+
+**现场**：验编辑器手机布局时量到 `innerWidth: 427`、`innerHeight: 925`，而脚本传的是 `390 844`。`document.documentElement.scrollWidth === innerWidth` 恒成立，所以 `noHScroll` 判据一直报 true——**这个假阴性把问题藏了很久**。
+
+**原因**：`Emulation.setDeviceMetricsOverride` 在 `--headless=new` + `mobile: true` 下，如果只给 `width/height` 而不给 `screenWidth/screenHeight`，Chrome 会把 layout viewport 落在**真实窗口的装饰尺寸**（窗口内容区 427×925），只有 `visualViewport.width` 是 390。页面上看到的是「被整体缩小 9.5% 的 427 宽布局」，而不是 390 宽布局。
+
+**影响面**：**2026-10-31 之前所有写「390 验收」的记录，量的都是 427。** 断点判断（<640）没错，所以布局逻辑的结论大多仍成立；但「390 下会不会挤」这类问题从来没被真正测到。本 ISSUE 就是因此发现的——编辑器在 427 下看着没问题，真 390 下顶栏把「片段/终端」压成了竖排。
+
+**修复**：
+
+1. 四个 UI 脚本的 `setDeviceMetricsOverride` 补 `screenWidth/screenHeight`；
+2. 手机顶栏瘦身：`.brand .name` 在 ≤640 隐藏、`.tab` 加 `white-space: nowrap`、`icon-btn` 34 → 28、徽标与间距收窄；
+3. 量布局改用 `mobile: false`（`npm run ui:editor`（`scripts/ui-editor.mjs`）），此时 `innerWidth` 与 viewport 一致，且不做 shrink-to-fit。
+
+**教训**：**「没有横向滚动条」不等于「没有溢出」**。`mobile: true` 的 shrink-to-fit 会把溢出缩掉，只留下一个变大的 `innerWidth`。判溢出要量 `visualViewport` 与 `innerWidth` 是否一致，而不是量 `scrollWidth === innerWidth`。
+
+**关联**：`scripts/ui-shot.mjs`、`scripts/check-*.mjs`、`npm run ui:editor`（`scripts/ui-editor.mjs`）、§33 已知缺口。
+
+---
+
+#### ISSUE-025：方案 D 之后所有 UI 回归脚本都只会截到 401 横幅（中）—— **已修 · 2026-10-31**
+
+**现场**：改完鉴权后，`npm run ui:shot` 截出来的页面没有卡片、只有「这台设备还没有 token」的横幅。四个 `ui:*` 脚本都不带 token——它们以前靠 loopback 豁免活着（本机 `127.0.0.1` 直连）。
+
+**修复**：新增 `scripts/lib/token.mjs`：
+
+- `readToken()` 从仓库根 `.env` 读 `SNIP_TOKEN`（也认环境变量）；
+- `primeToken(send, url)` 用 `Page.addScriptToEvaluateOnNewDocument` 在每个新文档的最早期写 `localStorage.sniptoken`。
+
+用注入而不是「navigate → eval → reload」：后者要在每个脚本里改多处导航点，还会多一次白屏重载。注入在页面自身脚本之前执行，React 挂载时读到的已经是正确值。
+
+**验证**：`ui:shot` 截到 16 张卡片（未注入时 0 张）。
+
+**关联**：`scripts/lib/token.mjs`、四个 `scripts/*.mjs`、ISSUE-023。

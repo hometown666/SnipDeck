@@ -1,11 +1,14 @@
-import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, statSync } from 'node:fs'
+import { relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import Fastify, { type FastifyInstance } from 'fastify'
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify'
 import fastifyStatic from '@fastify/static'
 import {
   RunLog,
   SnippetStore,
+  SnippetWriteError,
+  deleteSnippet,
+  draftOf,
   groupOf,
   loadHosts,
   newRunId,
@@ -13,12 +16,16 @@ import {
   resolveTarget,
   resolveVars,
   runSnippet,
+  saveSnippet,
   type Hosts,
   type HostTarget,
   type RunEvent,
   type RunMeta,
   type RunPaneResult,
   type Snippet,
+  type SnippetDraft,
+  type Step,
+  type VarSpec,
 } from '@snipdeck/core'
 import { createDriver, ExecDriver } from '@snipdeck/drivers'
 import { isKnownShell, knownShells, SessionManager } from './sessions'
@@ -43,10 +50,6 @@ export type BuiltApp = {
   runs: RunLog
   sessions: SessionManager
   dirs: { data: string; snippets: string; tmp: string; runs: string }
-}
-
-function isLoopback(ip: string | undefined): boolean {
-  return !ip || ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
 }
 
 /** 一次 run 最多投几个目标：只是防呆，不是产品限制 */
@@ -130,7 +133,17 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
   })
 
   app.addHook('onRequest', async (req, reply) => {
-    if (!token || isLoopback(req.ip)) return
+    // 方案 D（2026-10-31）：**不再按来源 IP 豁免**。
+    //
+    // 旧写法是 `if (!token || isLoopback(req.ip)) return`，两个放行分支。第二个是洞：
+    // `tailscale serve` / nginx 会把远程请求从 127.0.0.1 转进来，`req.ip` 就是 loopback，
+    // 于是 SNIP_TOKEN 形同虚设——反代背后整个网段都能执行任意命令，而界面上看起来
+    // 「token 已经设了」。
+    //
+    // 现在只保留 `!token` 这一条，它的安全性来自 server.ts 的启动守卫：
+    // 无 token 时**只允许绑 loopback**，所以这条分支只可能在本机直连的开发场景成立。
+    // 有 token 就一律校验，本机也不例外。
+    if (!token) return
     // 静态壳（/、/assets/*、manifest、sw.js、favicon）免 token：它们自身不含任何数据，
     // 数据全在 /api 后面。把首屏也挡成 401 会让手机拿不到 HTML → 没有 ⚙ 按钮 →
     // token 无处填写 → 永远 401，即「要页面先过 token，要 token 先有页面」（ISSUE-001）。
@@ -184,6 +197,71 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
       return { cmds, pending, missing, redacted: Object.keys(values).filter((k) => s.vars?.[k]?.secret) }
     },
   )
+
+  // ——— 片段 CRUD（2026-10-31）———
+  // 写盘的全部规矩都在 core 的 saveSnippet / deleteSnippet 里：路径守卫、原子写、
+  // 序列化后自解析、mtime 冲突。这里只负责把「表单提交的 JSON」变成 draft，
+  // 再把 SnippetWriteError 映射成 HTTP 语义。
+  app.get<{ Params: { id: string } }>('/api/snippets/:id/detail', async (req, reply) => {
+    const s = store.get(req.params.id)
+    if (!s) return reply.code(404).send({ error: `片段不存在: ${req.params.id}` })
+    return {
+      ...draftOf(s),
+      relPath: relative(snippetsDir, s.file).replace(/\\/g, '/'),
+      // 编辑器把它原样带回来，服务端据此判断「我编辑期间有没有人动过这个文件」
+      mtimeMs: statSync(s.file).mtimeMs,
+    }
+  })
+
+  app.post('/api/snippets', async (req, reply) => {
+    const draft = asDraft(req.body)
+    if (typeof draft === 'string') return reply.code(400).send({ error: draft })
+    try {
+      const saved = saveSnippet(snippetsDir, draft)
+      // 立刻重建索引：watcher 有 200ms 去抖，不等它——
+      // 否则「保存成功」之后马上 GET 列表，可能还是旧的那份。
+      store.reindex()
+      return reply.code(201).send({ ok: true, id: draft.id, ...saved })
+    } catch (e) {
+      return sendWriteError(reply, e)
+    }
+  })
+
+  app.put<{ Params: { id: string }; Body: { mtimeMs?: unknown } }>(
+    '/api/snippets/:id',
+    async (req, reply) => {
+      const current = store.get(req.params.id)
+      if (!current) return reply.code(404).send({ error: `片段不存在: ${req.params.id}` })
+      const draft = asDraft(req.body)
+      if (typeof draft === 'string') return reply.code(400).send({ error: draft })
+      const expectedMtimeMs =
+        typeof req.body?.mtimeMs === 'number' && Number.isFinite(req.body.mtimeMs)
+          ? req.body.mtimeMs
+          : undefined
+      try {
+        const saved = saveSnippet(snippetsDir, draft, {
+          currentFile: current.file,
+          expectedMtimeMs,
+        })
+        store.reindex()
+        return reply.send({ ok: true, id: draft.id, renamed: draft.id !== current.id, ...saved })
+      } catch (e) {
+        return sendWriteError(reply, e)
+      }
+    },
+  )
+
+  app.delete<{ Params: { id: string } }>('/api/snippets/:id', async (req, reply) => {
+    const s = store.get(req.params.id)
+    if (!s) return reply.code(404).send({ error: `片段不存在: ${req.params.id}` })
+    try {
+      const backup = deleteSnippet(snippetsDir, s.file, s.id)
+      store.reindex()
+      return { ok: true, id: s.id, backup: relative(snippetsDir, backup).replace(/\\/g, '/') }
+    } catch (e) {
+      return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) })
+    }
+  })
 
   app.get('/api/hosts', async () =>
     Object.entries(hosts).map(([name, t]) => ({
@@ -399,6 +477,98 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
     sessions,
     dirs: { data: dataDir, snippets: snippetsDir, tmp: tmpDir, runs: runsDir },
   }
+}
+
+/**
+ * 把表单提交的 JSON 收敛成 `SnippetDraft`。
+ *
+ * 返回 string 表示「为什么不行」——比抛异常好读，也不会把校验错误和非预期异常混在一起
+ * （后者回 500，前者回 400）。
+ *
+ * 收敛而不是直接 cast：写盘是**覆盖用户文件**，多带一个 `file` 字段进来就可能
+ * 把路径指向别处；而 `shell: "bash"` 这种值不该被静默存成一条跑不动的片段。
+ */
+function asDraft(body: unknown): SnippetDraft | string {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return '请求体必须是片段对象'
+  const b = body as Record<string, unknown>
+
+  const id = typeof b.id === 'string' ? b.id.trim() : ''
+  if (!id) return 'id 不能为空'
+  if (!Array.isArray(b.steps) || b.steps.length === 0) return 'steps 至少要有一项'
+  for (const [i, st] of b.steps.entries()) {
+    if (!st || typeof st !== 'object' || Array.isArray(st)) return `steps[${i}] 必须是对象`
+  }
+
+  const rawShell = typeof b.shell === 'string' ? b.shell.trim() : ''
+  if (rawShell && rawShell !== 'cmd' && rawShell !== 'powershell') {
+    return `shell 只能是 cmd 或 powershell（收到 ${rawShell}）`
+  }
+
+  const text = (v: unknown): string | undefined =>
+    typeof v === 'string' && v.trim() ? v.trim() : undefined
+
+  let tags: string[] | undefined
+  if (typeof b.tags === 'string') {
+    tags = b.tags.split(',').map((t) => t.trim()).filter(Boolean)
+  } else if (Array.isArray(b.tags)) {
+    tags = b.tags.map((t) => String(t).trim()).filter(Boolean)
+  } else if (b.tags !== undefined && b.tags !== null) {
+    return 'tags 必须是数组或逗号分隔的字符串'
+  }
+
+  let meta: Record<string, unknown> | undefined
+  if (b.meta !== undefined && b.meta !== null) {
+    if (typeof b.meta !== 'object' || Array.isArray(b.meta)) return 'meta 必须是对象'
+    meta = Object.keys(b.meta as object).length > 0 ? (b.meta as Record<string, unknown>) : undefined
+  }
+
+  let vars: Record<string, VarSpec> | undefined
+  if (b.vars !== undefined && b.vars !== null) {
+    if (typeof b.vars !== 'object' || Array.isArray(b.vars)) return 'vars 必须是对象'
+    const out: Record<string, VarSpec> = {}
+    for (const [rawName, rawSpec] of Object.entries(b.vars as Record<string, unknown>)) {
+      const name = rawName.trim()
+      if (!name) return 'vars 里不能有空变量名'
+      if (!rawSpec || typeof rawSpec !== 'object' || Array.isArray(rawSpec)) {
+        return `vars.${name} 必须是对象`
+      }
+      const s = rawSpec as Record<string, unknown>
+      const spec: VarSpec = {}
+      if (typeof s.prompt === 'string' && s.prompt) spec.prompt = s.prompt
+      if (typeof s.default === 'string' || typeof s.default === 'number') spec.default = s.default
+      if (Array.isArray(s.choices)) {
+        spec.choices = s.choices.map((c) => (typeof c === 'number' ? c : String(c)))
+      }
+      if (s.secret === true) spec.secret = true
+      if (typeof s.from === 'string' && s.from) spec.from = s.from
+      out[name] = spec
+    }
+    vars = Object.keys(out).length > 0 ? out : undefined
+  }
+
+  return {
+    id,
+    title: text(b.title),
+    group: text(b.group),
+    target: text(b.target),
+    shell: rawShell === 'cmd' || rawShell === 'powershell' ? rawShell : undefined,
+    tags: tags?.length ? tags : undefined,
+    danger: b.danger === true ? true : undefined,
+    meta,
+    vars,
+    steps: b.steps as Step[],
+  }
+}
+
+function sendWriteError(reply: FastifyReply, e: unknown) {
+  if (e instanceof SnippetWriteError) {
+    // conflict / exists 是 409：客户端拿到它应该刷新或换 id，而不是改内容重试
+    const status = e.kind === 'conflict' || e.kind === 'exists' ? 409 : 400
+    return reply
+      .code(status)
+      .send({ error: e.problems.join('；'), kind: e.kind, problems: e.problems })
+  }
+  return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) })
 }
 
 function publicView(s: Snippet, snippetsDir: string) {

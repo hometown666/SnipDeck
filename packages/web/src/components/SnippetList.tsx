@@ -15,6 +15,7 @@ export function SnippetList({
   active,
   onOpen,
   onFan,
+  onEdit,
   needToken,
   onFillToken,
 }: {
@@ -27,6 +28,8 @@ export function SnippetList({
   onOpen: (s: SnippetView) => void
   /** 打开目标选择器（同目标多开） */
   onFan: (s: SnippetView) => void
+  /** 打开编辑器（不执行） */
+  onEdit: (s: SnippetView) => void
   needToken: boolean
   onFillToken: () => void
 }) {
@@ -91,6 +94,21 @@ export function SnippetList({
                       }}
                     >
                       ⊕
+                    </span>
+                    {/* 编辑入口：放右下角，与右上角的 ⊕ 对角分开——
+                        两个热区挨在一起时，指针设备上很容易点错（一个是「选目标」，一个是「改片段」） */}
+                    <span
+                      className="card-edit"
+                      role="button"
+                      tabIndex={-1}
+                      aria-label="编辑片段"
+                      title="编辑片段（选中后按 E）"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onEdit(s)
+                      }}
+                    >
+                      ✎
                     </span>
                   </button>
                 )

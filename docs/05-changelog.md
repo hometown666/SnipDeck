@@ -170,3 +170,14 @@
   - 手机端面板改成底部 sheet（全宽 / 上方圆角 / 安全区留白）；第一版居中弹窗在 390 宽下底部提示被切。
   - 实测：16 条片段 / 5 分组；`run-backtrans` 变量渲染无 `{{}}` 残留；插入后**提示符仍只有一个**（未执行）；桌面 1366 与手机 390 均通过。终端 chunk gzip 89.94KB（+1.66）。
 
+- **v3.0**（2026-10-31，P6 片段 CRUD + 鉴权方案 D）：
+  - **片段的增 / 改 / 删真的能在网页里做了**。四条新路由：`GET /api/snippets/:id/detail`（完整字段 + `relPath` + `mtimeMs`）、`POST` / `PUT` / `DELETE /api/snippets(/:id)`。`PUT` 改 `id` 即改名，文件跟着搬到新分组目录。
+  - 新增 `packages/core/src/snippet-write.ts`：路径守卫（`safeSegment` + 按段比越界）、原子写（`.tmp` → rename）、序列化后自解析、覆盖前 `.bak`、删除进 `snippets/.trash/*.yaml.txt`（不会被当成片段加载）、写后立刻 `store.reindex()`。
+  - **`id` 全库唯一**：写前扫索引，撞了就 409。第一版只查目标文件是否存在，于是同一个 id 能在两个分组各存一份，`loadSnippets()` 保留一份、quarantine 另一份——界面正常但改了不生效（ISSUE-022）。
+  - **mtime 冲突检测**：`PUT` 带上读到的 `mtimeMs`，对不上回 409 且**不碰文件**。编辑器开着时被 VS Code / `git pull` 改掉，不会再被静默覆盖。
+  - 新增 `components/SnippetEditor.tsx`：结构化表单（id / 标题 / 分组 datalist / 目标 / shell / 标签 / danger / vars 行表 / steps 卡片 / meta 键值行），步骤支持 run / sleep / expect 三种分支与上下移动。保存后底部 toast 回执；删除要连点两次。
+  - **鉴权改方案 D**（`ISSUE-023`）：删掉 `isLoopback(req.ip)` 豁免，有 token 就一律校验。反代（`tailscale serve`）不再能把「从 127.0.0.1 转进来」变成免 token。冒烟里「loopback 免 token」那条用例改成断言 401。
+  - 新增 `scripts/lib/token.mjs`：四个 UI 脚本从 `.env` 读 token 并注入 `localStorage`（方案 D 之后不注入只会截到 401 横幅，ISSUE-025）。
+  - **修 ISSUE-024：UI 脚本的「390」其实是 427**。`mobile: true` 下不给 `screenWidth/screenHeight` 时 layout viewport 会落在真实窗口宽，只有 `visualViewport` 是 390，且 `scrollWidth === innerWidth` 的判据恒真——这个假阴性藏了很久。顺带修掉真 390 下顶栏把「片段/终端」压成竖排的问题。
+  - 新增 `npm run test:session-reap`：**真 60 秒**宽限期跑两条回收路径（不进 `npm test`）。实测 62s 回收，日志 `grace-arm → grace-fire(kill=true) → kill(reason=grace)` 闭环；ISSUE-020 从「待观察」改「已验证（原始故障未复现）」。
+  - 冒烟 66 → **94** 条；主包 gzip 55.92 → 60.04KB（+4.12，编辑器进主包），终端 chunk 仍 89.94 按需加载。

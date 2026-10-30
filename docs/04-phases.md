@@ -494,3 +494,54 @@ npm run ui:shot -- http://127.0.0.1:7878/ 390  844  data/tmp/ui-mobile-regress.p
 - 列表没做虚拟滚动：16 条无所谓，涨到几百条会卡。
 - 桌面窗口很窄（<720px）时面板和终端都在挤，没专门适配。
 
+
+## 33. P6 实施记录：片段 CRUD + 结构化表单（2026-10-31）
+
+**这一期做了什么**
+
+| 块 | 具体 |
+|---|---|
+| 写入层 | 新增 `packages/core/src/snippet-write.ts`：`saveSnippet` / `deleteSnippet` / `safeSegment` / `snippetPath` / `serializeSnippet` / `verifySerialized`。路径守卫、原子写、序列化自检、mtime 冲突、id 唯一四件事全在这一层，路由只管把 JSON 收敛成 draft |
+| 路由 | `GET /api/snippets/:id/detail`、`POST /api/snippets`、`PUT /api/snippets/:id`、`DELETE /api/snippets/:id`。`PUT` 的 `body.id` 与 URL 不同即改名（文件跟着搬） |
+| 鉴权 | **方案 D**：删掉 `isLoopback(req.ip)` 那条放行分支，保留 `!token`。有 token 就一律校验（本机也不例外），没 token 时靠 `server.ts` 已强制的「只能绑 loopback」兜底 |
+| 编辑器 | 新组件 `components/SnippetEditor.tsx`：id / 标题 / 分组（datalist）/ 目标 / shell / 标签 / danger / vars 行表 / steps 卡片（run / sleep / expect 三种分支）/ meta 键值行。删除是「点一次换文案、再点才删」 |
+| 入口 | 顶栏 `＋` 新建（快捷键 `N`）、卡片右下角 `✎`（快捷键 `E`）、保存/删除后底部 toast 回执 |
+| 验收脚本 | 新增 `npm run test:session-reap`：**真 60 秒**宽限期跑「没人连 / 连上后断开」两条回收路径，**不进 `npm test`**（跑一次 70s） |
+| UI 工具 | `scripts/lib/token.mjs`：UI 脚本从 `.env` 读 token 并注入（方案 D 之后不注入就只会截到 401 横幅）。四个 UI 脚本全部接上 |
+
+**验收实测**
+
+| 项 | 结果 |
+|---|---|
+| `npm test` | **94 通过，0 失败**（原 66 + CRUD 28 条） |
+| 新建 | `POST` → 201，`snippets/状态/zz-probe-save.yaml` 落盘，索引立刻可见（不等 watcher 去抖） |
+| 数字保持数字 | 接口传 `default: 1` / `choices: [1,2,3]`，落盘仍是 `default: 1`，没变成 `'1'` |
+| 改名 | `PUT` body.id 换掉 → 200 `renamed=true`，旧文件消失、新文件在、索引无残留 |
+| 冲突 | 旧 mtime → 409，且**文件内容一个字没动** |
+| 覆盖 | 同路径保存前后各留一份 `.bak` |
+| 删除 | 200，卡片消失，`snippets/.trash/zz-probe-save-<时间戳>.yaml.txt` 有副本，且不被当成片段加载（列表仍 16 条） |
+| 穿越 | `id: "../../evil"` + `group: "../.."` → 落点仍在 `snippets/` 内（`.._` / `.._.._evil.yaml`） |
+| 编辑器几何（桌面 1366×900） | 760×810 居中，`editor-grid` 两列 352+352，19 个输入控件 **0 溢出**，底部按钮 sticky（滚到顶仍可见） |
+| 编辑器几何（真 390×844） | 宽 390 正好贴边，底部 sheet，变量行 2×3 成组，`docNoHScroll: true` |
+| 体积 | 主包 gzip 55.92 → **60.04KB**（+4.12，编辑器进主包）；CSS 3.31 → 3.90（+0.59）；终端 chunk 仍 89.94 按需加载 |
+| 会话回收（真 60s） | 两条路径都在 **62s** 内回收，日志 `grace-arm → grace-fire(kill=true) → kill(reason=grace)` 完整 |
+
+**与设计/直觉不一样的取舍**
+
+1. **编辑形态选了结构化表单，代价写清楚**：保存会重排整份 YAML，注释、字段顺序、引号风格都不保留（`meta.note` 的 `>` 折叠块会变成普通多行串）。内容保真，形式不保真。选它是因为字段多、手机上要能改；原文 YAML 编辑留到以后。
+2. **`meta` 里非字符串的值不展示**：数字、对象、数组进 `hiddenMeta`，保存时原样带回。表单里没有合适的控件，而「把对象拍平成 `[object Object]`」这种静默损坏比「看不到」糟得多。
+3. **`id` 是全库唯一，不只是目录内唯一**：第一版只检查目标文件是否已存在，于是「先建 `状态/smoke-new.yaml`、再建不带 group 的同 id」会落成两份。`loadSnippets()` 只保留先加载的那份、另一份 quarantine——界面看着正常，实际改了不生效。现在写前先扫一遍索引（ISSUE-022）。
+4. **`assertInside` 的判断不能写 `startsWith('..')`**：一个叫 `.._` 的合法目录名也会命中。第一版就这么写的，被穿越用例当场抓出来（ISSUE-021）。
+5. **`safeSegment` 把 `.` 也换掉**：`..` 在路径里是上跳、在 Windows 上是非法结尾，而 `.._` 这类残留名能绕过只检查前两个字符的判据。宁可用下划线。
+6. **`mtimeMs` 冲突检测是「便宜但值钱」的一件**：编辑器开着的时候文件被 VS Code 改掉、被 `git pull` 覆盖，是真实会发生的。加它只花了 ~20 行，省下的是「一次保存吃掉别人半小时」。
+7. **删除的二次确认不用 `window.confirm`**：项目里所有确认都是自己的弹窗；用 `confirm` 会阻塞事件循环、手机上是浏览器原生样式，和其余交互不像一个东西。
+8. **`test:session-reap` 不进 `npm test`**：80 秒的测试没人会在提交前跑。它验证的是「60 秒这个量级上定时器仍会 fire」，主测试里的 800ms 缩短版验证的是「定时器逻辑对」——两件事，不能互相替代（ISSUE-020 的原始故障就是缩短版过了、真实时长没过）。
+
+**已知缺口**
+
+- **没有原文编辑**：想写注释、调字段顺序、用 YAML 锚点，还是得开文件。表单保存一次就把这些抹平。
+- **保存即重排**：同一份内容改一个字，diff 可能是整段。想 diff 友好只能不做表单（或改成 `doc.setIn` 逐字段改，但 `steps` 是数组，增删一步必然整体重写）。
+- **没有「复制片段」**：新建一条相似的还得从头填。
+- **`meta` 的非字符串值不可编辑**：能保住，不能改。
+- **手机顶栏隐藏了品牌名**：390 宽下「品牌名 + 4 个按钮 + 状态徽标」挤不下，tab 会被压到竖排。现在手机上只留 `{}`。
+- **UI 脚本的视口一直是错的**：`Emulation.setDeviceMetricsOverride` 在 `--headless=new` 且 `mobile: true` 时，若不给 `screenWidth/screenHeight`，`innerWidth` 会落在真实窗口宽（427）而只有 `visualViewport` 是 390。这意味着 **2026-10-31 之前所有写「390 验收」的地方，实际量的是 427**。已补 `screenWidth/screenHeight`（ISSUE-024）；要量布局仍建议用 `mobile: false`（`npm run ui:editor` 就是这么做的）。

@@ -25,6 +25,69 @@ export type HostView = {
   default: boolean
 }
 
+/** 片段的一个步骤：与 core 的 Step 联合类型对齐（编辑器要把它完整读回来再写回去） */
+export type SnippetStep =
+  | { do: 'run'; cmd: string; timeout?: number; optional?: boolean; queue?: boolean }
+  | { do: 'sleep'; ms: number; optional?: boolean }
+  | {
+      do: 'expect'
+      match: string
+      flags?: string
+      from?: string
+      timeout?: number
+      interval?: number
+      optional?: boolean
+    }
+
+export type SnippetVarSpec = {
+  prompt?: string
+  default?: string | number
+  choices?: (string | number)[]
+  secret?: boolean
+  from?: string
+}
+
+/** `GET /api/snippets/:id/detail`：编辑器要的完整字段 + 冲突检测用的 mtime */
+export type SnippetDetail = {
+  id: string
+  title?: string
+  group?: string
+  target?: string
+  shell?: 'cmd' | 'powershell'
+  tags?: string[]
+  danger?: boolean
+  meta?: Record<string, unknown>
+  vars?: Record<string, SnippetVarSpec>
+  steps: SnippetStep[]
+  /** 相对 snippets 根的路径，形如 `状态/check-instance.yaml` */
+  relPath: string
+  mtimeMs: number
+}
+
+export type SnippetSaveInput = {
+  id: string
+  title?: string
+  group?: string
+  target?: string
+  shell?: 'cmd' | 'powershell'
+  tags?: string[]
+  danger?: boolean
+  meta?: Record<string, unknown>
+  vars?: Record<string, SnippetVarSpec>
+  steps: SnippetStep[]
+  /** 编辑时带上读到的 mtime；对不上服务端回 409，不会静默覆盖 */
+  mtimeMs?: number
+}
+
+export type SnippetSaveResult = {
+  ok: boolean
+  id: string
+  relPath: string
+  created?: boolean
+  renamed?: boolean
+  mtimeMs: number
+}
+
 /** 多目标执行时每条事件都带 target / targetIndex（服务端打的标） */
 export type RunEvent =
   | {
@@ -203,6 +266,22 @@ export const api = {
   snippets: () => req<SnippetView[]>('/api/snippets'),
   hosts: () => req<HostView[]>('/api/hosts'),
   health: () => req<HealthView>('/api/health'),
+  /** 编辑用：完整字段 + mtime（列表里的 SnippetView 只有摘要） */
+  snippetDetail: (id: string) =>
+    req<SnippetDetail>(`/api/snippets/${encodeURIComponent(id)}/detail`),
+  createSnippet: (input: SnippetSaveInput) =>
+    req<SnippetSaveResult>('/api/snippets', { method: 'POST', body: JSON.stringify(input) }),
+  updateSnippet: (id: string, input: SnippetSaveInput) =>
+    req<SnippetSaveResult>(`/api/snippets/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  /** 删除会先把副本放进 snippets/.trash/，返回的 backup 是那份副本的相对路径 */
+  deleteSnippet: (id: string) =>
+    req<{ ok: boolean; id: string; backup: string }>(
+      `/api/snippets/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    ),
   runs: (limit = 20, snippet?: string) =>
     req<RunListItem[]>(
       `/api/runs?limit=${limit}${snippet ? `&snippet=${encodeURIComponent(snippet)}` : ''}`,

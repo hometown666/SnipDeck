@@ -15,6 +15,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync, writeFileSync } from 'node:fs'
 import { profileDir } from './lib/profile.mjs'
+import { primeToken } from './lib/token.mjs'
 
 const CANDIDATES = [
   process.env.CHROME_PATH,
@@ -92,11 +93,17 @@ const evalJs = async (expression) => {
 }
 
 await send('Page.enable')
+// 方案 D 之后 /api 一律要 token（本机也不例外），不注入就只会截到 401 横幅
+await primeToken(send, url)
 await send('Emulation.setDeviceMetricsOverride', {
   width,
   height,
   deviceScaleFactor: 2,
   mobile: width < 700,
+  // 不给 screenWidth/screenHeight 时 Chrome 会用窗口的真实装饰尺寸，
+  // 结果 layout viewport 变成 427 而不是 390（只有 visualViewport 是 390）
+  screenWidth: width,
+  screenHeight: height,
 })
 await send('Page.navigate', { url })
 await sleep(2600)

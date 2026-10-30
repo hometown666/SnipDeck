@@ -190,7 +190,18 @@ const withAuth = await app.inject({
 })
 check('远端带 token → 200', withAuth.statusCode === 200, String(withAuth.statusCode))
 const loopback = await app.inject({ method: 'GET', url: '/api/snippets' })
-check('loopback 免 token', loopback.statusCode === 200)
+// 方案 D（2026-10-31）：这条用例以前断言「loopback 免 token」——它钉住的正是那个洞。
+// 反代会把公网请求从 127.0.0.1 转进来，按来源 IP 豁免等于 token 白设。
+check('loopback 无 token → 401（方案 D）', loopback.statusCode === 401, String(loopback.statusCode))
+const loopbackAuth = await app.inject({ method: 'GET', url: '/api/snippets', headers: auth })
+check('loopback 带 token → 200', loopbackAuth.statusCode === 200, String(loopbackAuth.statusCode))
+const proxied = await app.inject({
+  method: 'GET',
+  url: '/api/snippets',
+  remoteAddress: '127.0.0.1',
+  headers: { 'x-forwarded-for': '100.64.0.9' },
+})
+check('反代转进来（127.0.0.1 + XFF）无 token → 401', proxied.statusCode === 401, String(proxied.statusCode))
 
 // 1b. 静态壳免 token（ISSUE-001：首屏被挡 = 手机没有入口填 token，死锁）
 const WEB_DIST = join(REPO_ROOT, 'packages/web/dist')
@@ -514,6 +525,169 @@ if (!bridgeUp) {
   check('ERR| 输出被判为失败', errBody.includes('"ok":false'), errBody.slice(-200))
   check('失败原因带 note', errBody.includes('ERR| 开头'), errBody.slice(-200))
 }
+
+// 10. 片段 CRUD（P6）—— 放在最后，因为它真的会改 FIXTURE 里的文件
+const crudDetail = await app.inject({
+  method: 'GET',
+  url: '/api/snippets/check-instence/detail',
+  headers: auth,
+})
+const detailBody = crudDetail.json() as {
+  id?: string
+  steps?: unknown
+  mtimeMs?: number
+  relPath?: string
+  file?: unknown
+}
+check(
+  'detail → 200 且带 steps / mtimeMs / relPath',
+  crudDetail.statusCode === 200 &&
+    Array.isArray(detailBody.steps) &&
+    typeof detailBody.mtimeMs === 'number' &&
+    typeof detailBody.relPath === 'string',
+  crudDetail.body.slice(0, 200),
+)
+check('detail 不把服务端 file 绝对路径送出去', detailBody.file === undefined)
+
+const NEW_FILE = join(FIXTURE, 'snippets', '状态', 'smoke-new.yaml')
+const created = await app.inject({
+  method: 'POST',
+  url: '/api/snippets',
+  headers: auth,
+  payload: {
+    id: 'smoke-new',
+    title: '冒烟新建',
+    group: '状态',
+    target: 'win-desktop',
+    shell: 'cmd',
+    tags: 'smoke, crud',
+    vars: { n: { prompt: '编号', default: 1 } },
+    steps: [{ do: 'run', cmd: 'echo {{n}}' }],
+  },
+})
+check('POST 新建 → 201', created.statusCode === 201, created.body)
+check('新建后文件落盘', existsSync(NEW_FILE))
+check('新建后索引里立刻就有（不等 watcher 去抖）', store.get('smoke-new') !== undefined)
+const newYaml = existsSync(NEW_FILE) ? readFileSync(NEW_FILE, 'utf8') : ''
+check('落盘内容不含 file 字段', !newYaml.includes('file:'), newYaml.slice(0, 120))
+check('tags 字符串被拆成数组', newYaml.includes('- smoke') && newYaml.includes('- crud'), newYaml.slice(0, 200))
+
+const dup = await app.inject({
+  method: 'POST',
+  url: '/api/snippets',
+  headers: auth,
+  payload: { id: 'smoke-new', steps: [{ do: 'run', cmd: 'echo x' }] },
+})
+check('POST 重复 id → 409', dup.statusCode === 409, dup.body)
+
+const noSteps = await app.inject({
+  method: 'POST',
+  url: '/api/snippets',
+  headers: auth,
+  payload: { id: 'bad-one', steps: [] },
+})
+check('POST 空 steps → 400', noSteps.statusCode === 400, noSteps.body)
+
+const badShell = await app.inject({
+  method: 'POST',
+  url: '/api/snippets',
+  headers: auth,
+  payload: { id: 'bad-shell', shell: 'bash', steps: [{ do: 'run', cmd: 'echo x' }] },
+})
+check('POST 非法 shell → 400', badShell.statusCode === 400, badShell.body)
+
+const badStep = await app.inject({
+  method: 'POST',
+  url: '/api/snippets',
+  headers: auth,
+  payload: { id: 'bad-step', steps: [{ do: 'run' }] },
+})
+check('POST step 缺 cmd → 400 且指出第几步', badStep.statusCode === 400 && badStep.body.includes('steps[0]'), badStep.body)
+
+const traversal = await app.inject({
+  method: 'POST',
+  url: '/api/snippets',
+  headers: auth,
+  payload: { id: '../../evil', group: '../..', steps: [{ do: 'run', cmd: 'echo x' }] },
+})
+const traversalRel = (traversal.json() as { relPath?: string }).relPath ?? ''
+check(
+  '穿越型 id 落点仍在 snippets 内',
+  traversal.statusCode === 201 && !traversalRel.startsWith('..') && !existsSync(join(tmpdir(), 'evil.yaml')),
+  `${traversal.statusCode} ${traversalRel}`,
+)
+
+const renamed = await app.inject({
+  method: 'PUT',
+  url: '/api/snippets/smoke-new',
+  headers: auth,
+  payload: { id: 'smoke-renamed', title: '改过名', group: '状态', steps: [{ do: 'run', cmd: 'echo hi' }] },
+})
+const renamedBody = renamed.json() as { renamed?: boolean; mtimeMs?: number }
+check(
+  'PUT 改名 → 200 且 renamed=true',
+  renamed.statusCode === 200 && renamedBody.renamed === true,
+  renamed.body,
+)
+check('改名后旧文件消失', !existsSync(NEW_FILE))
+check('改名后新文件在', existsSync(join(FIXTURE, 'snippets', '状态', 'smoke-renamed.yaml')))
+check(
+  '改名后索引里没有旧 id 残留',
+  store.get('smoke-new') === undefined && store.get('smoke-renamed') !== undefined,
+)
+
+const conflicted = await app.inject({
+  method: 'PUT',
+  url: '/api/snippets/smoke-renamed',
+  headers: auth,
+  payload: {
+    id: 'smoke-renamed',
+    mtimeMs: (renamedBody.mtimeMs ?? 0) - 5000,
+    steps: [{ do: 'run', cmd: 'echo should-not-land' }],
+  },
+})
+check('mtime 对不上 → 409（不静默覆盖别人的改动）', conflicted.statusCode === 409, conflicted.body)
+const afterConflict = readFileSync(join(FIXTURE, 'snippets', '状态', 'smoke-renamed.yaml'), 'utf8')
+check('409 之后文件内容没被改', !afterConflict.includes('should-not-land'), afterConflict.slice(0, 120))
+
+// 同路径覆盖也要先留 .bak：手滑保存一次就没有退路了，代价只是一个文件
+const updated = await app.inject({
+  method: 'PUT',
+  url: '/api/snippets/smoke-renamed',
+  headers: auth,
+  payload: {
+    id: 'smoke-renamed',
+    title: '再改一次',
+    group: '状态',
+    steps: [{ do: 'run', cmd: 'echo again' }],
+    mtimeMs: renamedBody.mtimeMs,
+  },
+})
+check('PUT 同路径覆盖 → 200', updated.statusCode === 200, updated.body)
+check(
+  '覆盖前留了 .bak',
+  existsSync(join(FIXTURE, 'snippets', '状态', 'smoke-renamed.yaml.bak')),
+)
+check(
+  '覆盖后内容真的变了',
+  readFileSync(join(FIXTURE, 'snippets', '状态', 'smoke-renamed.yaml'), 'utf8').includes('echo again'),
+)
+
+const del = await app.inject({ method: 'DELETE', url: '/api/snippets/smoke-renamed', headers: auth })
+check('DELETE → 200', del.statusCode === 200, del.body)
+check('删除后文件消失', !existsSync(join(FIXTURE, 'snippets', '状态', 'smoke-renamed.yaml')))
+const trashDir = join(FIXTURE, 'snippets', '.trash')
+check(
+  '删除留了回收站副本',
+  existsSync(trashDir) && readdirSync(trashDir).some((f) => f.startsWith('smoke-renamed-')),
+)
+check(
+  '回收站副本不会被当成片段加载',
+  store.list().every((s) => !s.file.includes('.trash')),
+  JSON.stringify(store.list().map((s) => s.id)),
+)
+const delAgain = await app.inject({ method: 'DELETE', url: '/api/snippets/smoke-renamed', headers: auth })
+check('DELETE 不存在 → 404', delAgain.statusCode === 404, String(delAgain.statusCode))
 
 await app.close()
 tryRemove(FIXTURE)

@@ -12,6 +12,7 @@ export function Topbar({
   onRefresh,
   onHistory,
   onSettings,
+  onNew,
 }: {
   health: HealthView | null
   tokenSet: boolean
@@ -19,6 +20,7 @@ export function Topbar({
   onRefresh: () => void
   onHistory: () => void
   onSettings: () => void
+  onNew: () => void
 }) {
   return (
     <header className="topbar">
@@ -36,6 +38,9 @@ export function Topbar({
             排队 {health.queue}
           </span>
         ) : null}
+        <button className="icon-btn" onClick={onNew} aria-label="新建片段" title="新建片段（N）">
+          ＋
+        </button>
         <button className="icon-btn" onClick={onRefresh} aria-label="刷新" title="刷新（R）">
           ⟳
         </button>

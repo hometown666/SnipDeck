@@ -44,7 +44,9 @@ export function Sidebar({
           </button>
         ))}
       </nav>
-      <p className="nav-hint">/ 搜索 · ↑↓ 选择 · Enter 执行 · T 选目标 · H 历史 · Esc 关闭</p>
+      <p className="nav-hint">
+        / 搜索 · ↑↓ 选择 · Enter 执行 · T 选目标 · E 编辑 · N 新建 · H 历史 · Esc 关闭
+      </p>
     </aside>
   )
 }

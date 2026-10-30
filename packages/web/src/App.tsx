@@ -16,6 +16,7 @@ import { RunDrawer } from './components/RunDrawer'
 import { RunFormModal } from './components/RunFormModal'
 import { SettingsModal } from './components/SettingsModal'
 import { Sidebar } from './components/Sidebar'
+import { SnippetEditor } from './components/SnippetEditor'
 import { SnippetList } from './components/SnippetList'
 import { Topbar } from './components/Topbar'
 import { applyEvent, fmtDur, paneLabel, paneStatus, replayOutput } from './lib/run-events'
@@ -57,6 +58,9 @@ export function App() {
   const [historyRuns, setHistoryRuns] = useState<RunListItem[] | null>(null)
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [replayId, setReplayId] = useState<string | null>(null)
+  /** 编辑器：null = 关；{ id } = 编辑某条；{} = 新建 */
+  const [editor, setEditor] = useState<{ id?: string } | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
 
   const panesRef = useRef<HTMLDivElement | null>(null)
 
@@ -117,6 +121,13 @@ export function App() {
     return () => clearInterval(t)
   }, [running])
 
+  // 保存/删除后的回执：只显示一句、2.6s 自动收，不用弹窗（弹窗还得点一下关）
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 2600)
+    return () => clearTimeout(t)
+  }, [toast])
+
   // 自动滚动：实时运行滚到底（看最新输出），历史回放回到顶部（从头读）
   useEffect(() => {
     const root = panesRef.current
@@ -162,6 +173,7 @@ export function App() {
       const typing = !!target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)
 
       if (e.key === 'Escape') {
+        if (editor) return setEditor(null)
         if (historyOpen) return setHistoryOpen(false)
         if (showSettings || needToken) return setShowSettings(false)
         if (draft) return setDraft(null)
@@ -185,7 +197,7 @@ export function App() {
 
       // `T` = 对当前选中的卡片打开目标选择器（Enter 是直接执行）。
       // 多开入口在指针设备上是隐藏的，键盘用户需要一个不靠鼠标的入口（ISSUE-008）。
-      if (!typing && !draft && !danger && !showSettings && !needToken && e.key.toLowerCase() === 't' && !e.ctrlKey && !e.metaKey && !e.altKey && flat[active]) {
+      if (!typing && !draft && !danger && !editor && !showSettings && !needToken && e.key.toLowerCase() === 't' && !e.ctrlKey && !e.metaKey && !e.altKey && flat[active]) {
         e.preventDefault()
         openSnippet(flat[active]!, false, true)
         return
@@ -196,6 +208,7 @@ export function App() {
         !typing &&
         !draft &&
         !danger &&
+        !editor &&
         !showSettings &&
         !needToken &&
         e.key.toLowerCase() === 'h' &&
@@ -206,6 +219,32 @@ export function App() {
         e.preventDefault()
         void openHistory()
         return
+      }
+
+      // `E` = 编辑当前选中的片段；`N` = 新建。
+      // 两个都是低频动作，键盘入口只为「不想去右下角点那个 22px 的小图标」而存在。
+      if (
+        !typing &&
+        !draft &&
+        !danger &&
+        !editor &&
+        !showSettings &&
+        !needToken &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey
+      ) {
+        const k = e.key.toLowerCase()
+        if (k === 'n') {
+          e.preventDefault()
+          setEditor({})
+          return
+        }
+        if (k === 'e' && flat[active]) {
+          e.preventDefault()
+          setEditor({ id: flat[active]!.id })
+          return
+        }
       }
 
       if (typing && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
@@ -465,6 +504,7 @@ export function App() {
         tokenSet={tokenSet}
         replayed={!!output?.replayed}
         onRefresh={() => void refresh()}
+        onNew={() => setEditor({})}
         onHistory={() => void openHistory()}
         onSettings={() => {
           setTokenInput(getToken())
@@ -493,10 +533,29 @@ export function App() {
           active={active}
           onOpen={(s) => openSnippet(s)}
           onFan={(s) => openSnippet(s, false, true)}
+          onEdit={(s) => setEditor({ id: s.id })}
           needToken={needToken}
           onFillToken={() => setShowSettings(true)}
         />
       </div>
+
+      {editor && (
+        <SnippetEditor
+          // key：从「编辑 A」直接切到「编辑 B」时要重建内部表单，否则会沿用上一条的状态
+          key={editor.id ?? 'new'}
+          snippetId={editor.id}
+          hosts={hosts}
+          groups={groups.map(([g]) => g)}
+          onSaved={(message) => {
+            setEditor(null)
+            setToast(message)
+            void refresh()
+          }}
+          onClose={() => setEditor(null)}
+        />
+      )}
+
+      {toast && <div className="toast">{toast}</div>}
 
       {draft && (
         <RunFormModal
