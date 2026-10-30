@@ -764,3 +764,70 @@ Error: [safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED]
 
 **关联**：§30、`sessions.ts`、[06-terminal.md](06-terminal.md) §24.3。
 
+---
+
+#### ISSUE-019：关会话点了没反应，服务端一次都没删（中）—— **已修 · 2026-10-30**
+
+**现场**：P5.2 真机测试 17 步「全部正常」，其中第 9 步是点会话的 `×`。用户点了 **9 次**，界面上的 chip 每次都消失了。查日志：
+
+```
+POST   /api/sessions        → 201  ×11
+DELETE /api/sessions/:id    → 400  ×9      ← 一次都没成功
+```
+
+响应体：
+
+```
+FST_ERR_CTP_EMPTY_JSON_BODY: Body cannot be empty when content-type is set to 'application/json'
+```
+
+**根因**（两层，第二层才是能隐瞒这么久的那个）：
+
+1. `api.ts` 的 `req()` **无条件**设 `Content-Type: application/json`；DELETE 没有 body，Fastify 的 JSON 解析器见「声明了 JSON 却是空体」直接 400。
+2. **前端把错误吞了**。`close()` 里写的是 `try { await api.deleteSession(id) } catch { /* 会话可能已经被回收 */ }`，catch 是空块，之后照常把 chip 从本地列表移除。于是「删失败」和「删成功」在界面上长得一模一样。
+
+**为什么测试没抓到**：`test:session` 里 DELETE 是用 `fetch` 直接打的，**没带 Content-Type**，服务端自然 200。测的是协议正确性，不是前端实现。
+
+**修法**：
+
+- `req()` 只在 `init.body !== undefined` 时才声明 content-type；
+- `close()` 只吞 404（会话确实已被回收），其他错误弹 alert 并**保留 chip**，不再假装成功。
+
+**验收**：CDP 点 `×` → chip 数 `1 → 0`、无 alert；日志 `DELETE /api/sessions/:id → 200`。
+
+**教训**：
+
+- **「界面看着对」不算验收。** chip 消失是前端状态，服务端删没删是另一件事，中间隔着一个空 catch。
+- **空 catch 是谎言的温床。** 至少要把「可以忽略的 404」和「真的失败了」分开——这条和 ISSUE-013（失败原因说不清）是同一类问题的两个面。
+
+**关联**：§31、`packages/web/src/api.ts`、`TerminalApp.tsx` 的 `close()`。
+
+---
+
+#### ISSUE-020：会话该在 60s 后回收却没回收（中）—— **待观察 · 2026-10-30**
+
+**现场**：真机测试结束时（23:14），一个 `cmd` 会话 `attached=0`、`state=running`，一直到 23:25 服务重启前都活着——**12 分钟**，而宽限期是 60 秒。它的子进程（PID 15124）也一直在，最后是被重启时的 `reapOrphans` 收掉的（这条链路本身工作正常）。
+
+**当时的困境**：P5.1/P5.2 的会话生命周期**一行日志都没有**。创建、attach、detach、宽限期 arm、fire、kill，全都不可见。所以只能确认「发生了」，没法回溯「哪一步断的」。
+
+**已做的三件事**：
+
+1. `Session` / `SessionManager` 加生命周期日志（`create` / `attach` / `detach` / `grace-arm` / `grace-fire` / `kill` / `exit`），走 Fastify 的 `app.log`，格式 `session <事件> id=… pid=…`。
+2. `detach` 加幂等保护（`done` 标志）：`ws.on('close')` 和 `ws.on('error')` 挂的是同一个 detach，重复调用会让 `armGrace` 反复重置定时器——这是当时最可疑的路径。
+3. `kill(reason)` 带上来源，日志里能看出是 `grace` / `remove` / `idle` 哪条路径收的。
+
+**现在的实测**（真实 60s 宽限期，不是缩短版）：
+
+| 路径 | 结果 |
+|---|---|
+| 创建后没人连（constructor 里的 `armGrace`） | t=65s 进程消失 ✅ |
+| 连上 → 用一会儿 → 断开（detach 里的 `armGrace`） | t=65s 进程消失 ✅ |
+
+日志完整闭环：`create → grace-arm → attach → detach → grace-arm → grace-fire(kill=true) → kill(reason=grace) → exit`。
+
+**为什么还标「待观察」**：原始故障没能复现，也就没法证明是上面哪一处修好的。加日志之前那 12 分钟里发生了什么，永久丢失了。
+
+**教训**：**给「时间相关」的机制留日志，优先级高于给它写测试。** 这条 60 秒的路径在测试里只跑过 800ms 的缩短版——缩短版过不代表真实时长下过，而失败时又一点痕迹都没有。
+
+**关联**：§30、§31、`sessions.ts`、[06-terminal.md](06-terminal.md) §24.3。
+

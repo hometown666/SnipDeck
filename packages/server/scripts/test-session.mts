@@ -206,6 +206,36 @@ try {
   check('resize 落到会话上', mine?.cols === 120 && mine?.rows === 40, `${mine?.cols}x${mine?.rows}`)
   check('attached 计到 1', mine?.attached === 1, `attached=${mine?.attached}`)
 
+  console.log('\n—— 断线重连（「刷新页面还能看到上文」的地基）——')
+  conn.ws.send(JSON.stringify({ t: 'input', d: 'echo BEFORE_DROP\r\n' }))
+  const sawBefore = await waitFor(() => conn.out.join('').includes('BEFORE_DROP'), 6000)
+  check('断开前有输出', sawBefore)
+  conn.ws.close()
+  await new Promise((r) => setTimeout(r, 300))
+
+  const again = openWs(`${wsBase}/ws/session/${id}?token=test-token-abc`)
+  const againReady = await again.ready
+  check('重连拿到 ready', againReady)
+  check(
+    'replay 里含断开前的输出',
+    again.out.join('').includes('BEFORE_DROP'),
+    JSON.stringify(again.out.join('').slice(-120)),
+  )
+
+  console.log('\n—— 多端同时附加 ——')
+  const second = openWs(`${wsBase}/ws/session/${id}?token=test-token-abc`)
+  await second.ready
+  const both = (await (await fetch(`${base}/api/sessions`, { headers: auth })).json()) as {
+    sessions?: { id: string; attached: number }[]
+  }
+  const attachedNow = both.sessions?.find((s) => s.id === id)?.attached
+  check('attached 计到 2', attachedNow === 2, `attached=${attachedNow}`)
+  again.ws.send(JSON.stringify({ t: 'input', d: 'echo TWO_VIEWERS\r\n' }))
+  const mirrored = await waitFor(() => second.out.join('').includes('TWO_VIEWERS'), 6000)
+  check('一端输入，另一端也看得到', mirrored)
+  second.ws.close()
+  again.ws.close()
+
   console.log('\n—— 鉴权（WS 不走 loopback 豁免）——')
   const wrong = await handshakeStatus(`${wsBase}/ws/session/${id}?token=wrong-token`)
   check('错误 token 被拒 401', wrong === 401, `got=${wrong}`)

@@ -147,3 +147,18 @@
   - **修 ISSUE-018**：定时器里 `rmSync` 被环境删除守卫拦下 → `uncaughtException` → 服务直接退出。改 `safeUnlink`（吞异常）+ 整块 `try/catch`，删不掉临时文件不再等于服务故障。
   - 真机实测：1366×768 填充率 1.004 × 0.995、390×844 纵向 0.993；两边都能敲 `echo TERM_PROBE` 并收到结果，无横向溢出。
 
+- **v2.2**（2026-10-30，P5.2 韧性与手机）：
+  - **断线重连**：`onclose` 后 800 / 1600 / 3200ms 三次退避，`ready` 到达清零；用 `wsRef.current !== ws` 判断旧连接，避免「主动断开→立刻重连」的竞态误判。
+  - **刷新接回同一会话**：`sessionStorage` 记 `snipdeck.term.active`，刷新后接回**这一个**而不是「随便一个 running」；测试断言刷新前后 `data-session-id` 完全相同。
+  - **心跳**：20s 发 `ping`、45s 无 `pong` 主动 close——修手机切后台 / 换网时 `close` 事件不来导致的「假在线」。
+  - **快捷键盘** 8 键（`Esc` `Tab` 粘滞 `Ctrl` `↑↓←→` `^C`），点完自动 focus 回终端；从 10 键砍到 8 是因为 390 宽实测 `^D`/`^Z` 被挤出屏幕，而它们能由粘滞 Ctrl 得到。
+  - **软键盘**：`ResizeObserver` 之外加监听 `visualViewport.resize`。
+  - 会话条加状态点与多端附加计数；连接状态四态徽标。
+  - `test:session` 27 → **32 条**（新增断线重连 replay、多端附加广播）；CDP 脚本新增 3 组断言（8 键、↑ 调历史、刷新接回）。终端 chunk gzip 88.25KB（+0.95）。
+
+- **v2.3**（2026-10-30 23:30，真机测试后的补修 · **砍掉 SSH**）：
+  - **真机测试**：17 步操作（桌面 9 + 手机 5 + 破坏性 2 + 准备 1）全部通过，手机经 Tailscale 直连 `100.99.202.54:7878`，token 鉴权生效（无 token / 错 token 均 401）。
+  - **修 ISSUE-019（关会话没真删）**：9 次 `DELETE /api/sessions/:id` 全部 **400**，因为 `req()` 无条件声明 `Content-Type: application/json` 而 DELETE 没有 body（`FST_ERR_CTP_EMPTY_JSON_BODY`）；前端 catch 是空块又照常移除 chip，界面上完全看不出来。修法：只在有 body 时声明 content-type；`close()` 只吞 404，其余错误弹 alert 并保留 chip。CDP 复验 chip 1→0、日志 `DELETE → 200`。
+  - **查 ISSUE-020（60s 宽限未回收）**：一个 `attached=0` 的会话活了 12 分钟。**当时会话生命周期一行日志都没有**，无法回溯。补：`create/attach/detach/grace-arm/grace-fire/kill/exit` 全量日志（走 `app.log`）、`detach` 幂等保护（close + error 都挂同一个 detach，重复调用会反复重置宽限定时器）、`kill(reason)` 标来源。修后用**真实 60s** 验两条路径（创建后不连 / 连过再断），均 t=65s 回收，日志闭环。根因未回溯，标「待观察」。
+  - **砍掉 P5.3 SSH**：本机终端已覆盖实际需求，SSH 要长期维护 `known_hosts` + 凭据 + 断线语义，换来的是一台不存在的机器。`Session` 的 `kind` 字段与协议留位，将来要接照 §24.1 加一个 `SshSession` 即可。`hosts.yaml` 的 `vps` 保留，仅作 `reserved` 样例。
+

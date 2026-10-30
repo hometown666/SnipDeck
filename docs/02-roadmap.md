@@ -36,7 +36,7 @@
 |---|---|---|
 | **P5.1** | `SessionManager` + 本机 ConPTY（powershell / cmd）+ WS 通道 + 最小 xterm 页（能敲、能看、能 resize） | 未开工 |
 | **P5.2** | 回滚缓冲（200KB）+ 断线重连 + 三条回收路径 + 手机快捷键盘 + 会话条 | 未开工 |
-| **P5.3** | SSH 会话（`ssh2` 的 `shell()` channel，**不是 `exec()`**）+ `known_hosts` 校验 | 未开工 |
+| **P5.3** ~~SSH 会话~~ | **砍掉（10-30）**：本机终端已覆盖实际需求；SSH 要维护 `known_hosts`、凭据、断线语义，换来的是一台不存在的机器。理由见 06-terminal.md §23.2 | — |
 | **P5.4** | 片段宏注入当前终端（点一下发命令行，再点执行） | 未开工 |
 
 **前置验证已完成（2026-10-30 实测，全部通过）**：node-pty 1.1.0 零编译装好（9s / 2 个包）；ConPTY 在 `SnipDeck-server` 同款计划任务会话里起得来（`SPAWN=ok 62ms`）；交互往返 **40ms**；kill 后子孙进程回收干净（`ORPHAN=NO`）。完整数据与复现脚本见 [06-terminal.md](06-terminal.md) §28。

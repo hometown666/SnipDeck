@@ -48,6 +48,86 @@
   color: var(--accent);
 }
 
+.term-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: 9px;
+  border-radius: 50%;
+  background: #c9c7bf;
+}
+
+.term-dot.running {
+  background: var(--accent);
+}
+
+.term-chip-n {
+  margin-left: 4px;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+/* 连接状态徽标：绿色=连着，琥珀=正在连/重连（不是故障），灰=断开 */
+.badge.link-open {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: #cfe9e0;
+}
+
+.badge.link-connecting,
+.badge.link-reconnecting {
+  color: var(--amber);
+  background: var(--amber-soft);
+  border-color: #eadcbe;
+}
+
+.badge.link-idle,
+.badge.link-closed {
+  color: var(--text-2);
+  background: var(--bg);
+  border-color: var(--border);
+}
+
+/* 快捷键盘条：手机上这是唯一的 Esc / Tab / 方向键来源 */
+.term-keys {
+  display: flex;
+  gap: 4px;
+  padding: 6px 0 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.term-keys::-webkit-scrollbar {
+  display: none;
+}
+
+.term-key {
+  flex: none;
+  min-width: 34px;
+  padding: 6px 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.term-key:active {
+  background: var(--bg);
+}
+
+.term-key.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .term-chip-x {
   padding: 4px 8px 4px 2px;
   border: 0;

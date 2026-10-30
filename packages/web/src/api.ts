@@ -184,9 +184,16 @@ function authHeaders(): Record<string, string> {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  // **只有真的带 body 才声明 content-type。**
+  // 反过来（无条件设 application/json）会让 DELETE 这种无 body 的请求被
+  // Fastify 的空体解析器直接 400：`FST_ERR_CTP_EMPTY_JSON_BODY`。
+  // 症状极具欺骗性——前端 catch 掉错误、本地把行删了，界面看着「成功」，
+  // 服务端其实一次都没删（2026-10-30 实测 9 次 DELETE 全 400，见 ISSUE-019）。
+  const headers: Record<string, string> = { ...authHeaders() }
+  if (init?.body !== undefined && init.body !== null) headers['Content-Type'] = 'application/json'
   const r = await fetch(path, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...(init?.headers ?? {}) },
+    headers: { ...headers, ...((init?.headers as Record<string, string> | undefined) ?? {}) },
   })
   if (!r.ok) throw parseError(r.status, await r.text())
   return (await r.json()) as T

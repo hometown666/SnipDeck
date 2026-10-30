@@ -47,6 +47,8 @@ export interface CreateSessionOptions {
   rows?: number
 }
 
+export type SessionLogger = (level: 'info' | 'warn', msg: string) => void
+
 export interface SessionListener {
   onData: (chunk: string) => void
   onExit: (code: number) => void
@@ -135,7 +137,12 @@ export class Session {
   private graceTimer?: NodeJS.Timeout
   private exitedTimer?: NodeJS.Timeout
 
-  constructor(id: string, opts: CreateSessionOptions, private readonly graceMs: number) {
+  constructor(
+    id: string,
+    opts: CreateSessionOptions,
+    private readonly graceMs: number,
+    private readonly log: SessionLogger = () => {},
+  ) {
     const shell = SHELLS[opts.shell]
     if (!shell) throw new Error(`unknown shell: ${opts.shell}（可用：${knownShells().join(' / ')}）`)
 
@@ -171,6 +178,7 @@ export class Session {
       this.state = 'exited'
       this.exitCode = exitCode
       this.clearGrace()
+      this.log('info', `session exit id=${this.id} code=${exitCode}`)
       for (const l of this.listeners) {
         try {
           l.onExit(exitCode)
@@ -181,6 +189,7 @@ export class Session {
     })
 
     // 创建后 60s 内没人连上就回收：避免「点了新建又关页面」留下孤儿
+    this.log('info', `session create id=${id} shell=${this.shell} pid=${this.proc.pid} ${this.cols}x${this.rows}`)
     this.armGrace()
   }
 
@@ -217,8 +226,15 @@ export class Session {
     this.listeners.add(l)
     this.lastActiveAt = Date.now()
     this.clearGrace()
+    this.log('info', `session attach id=${this.id} attached=${this.listeners.size}`)
+    let done = false
     return () => {
+      // close 和 error 都会调 detach，同一个订阅者只该结算一次，
+      // 否则第一次 armGrace 之后第二次又会 clear+重设，宽限期被无限推后。
+      if (done) return
+      done = true
       this.listeners.delete(l)
+      this.log('info', `session detach id=${this.id} attached=${this.listeners.size} state=${this.state}`)
       if (this.listeners.size === 0 && this.state === 'running') this.armGrace()
     }
   }
@@ -249,10 +265,11 @@ export class Session {
    * 服务把 stdout 重定向到日志文件时父进程没有控制台，必然抛
    * `Error: AttachConsole failed` 并脏日志（docs/06-terminal.md §25.4）。
    */
-  kill(): void {
+  kill(reason = 'manual'): void {
     if (this.state === 'exited') return
     this.clearGrace()
     const pid = this.proc.pid
+    this.log('info', `session kill id=${this.id} pid=${pid} reason=${reason}`)
     execFile('taskkill', ['/F', '/T', '/PID', String(pid)], { windowsHide: true }, () => {
       /* 失败说明进程已自己退出，正常 */
     })
@@ -261,6 +278,7 @@ export class Session {
       if (this.state === 'running') {
         this.state = 'exited'
         this.exitCode = -1
+        this.log('warn', `session kill-timeout id=${this.id} pid=${pid} 3s 内没等到 exit，强制标 exited`)
         for (const l of this.listeners) {
           try {
             l.onExit(-1)
@@ -276,8 +294,14 @@ export class Session {
   private armGrace(): void {
     this.clearGrace()
     if (this.graceMs <= 0) return
+    this.log('info', `session grace-arm id=${this.id} in=${this.graceMs}ms`)
     this.graceTimer = setTimeout(() => {
-      if (this.listeners.size === 0 && this.state === 'running') this.kill()
+      const will = this.listeners.size === 0 && this.state === 'running'
+      this.log(
+        'info',
+        `session grace-fire id=${this.id} listeners=${this.listeners.size} state=${this.state} kill=${will}`,
+      )
+      if (will) this.kill('grace')
     }, this.graceMs)
     this.graceTimer.unref()
   }
@@ -304,6 +328,11 @@ export type SessionManagerOptions = {
   graceMs?: number
   idleMs?: number
   cwd?: string
+  /**
+   * 会话生命周期日志。终端的一切原先在日志里都不可见——
+   * 连上了没、断了没、谁回收的，全靠猜（2026-10-30 排查「宽限期不回收」时就吃了这个亏）。
+   */
+  log?: SessionLogger
 }
 
 export class SessionManager {
@@ -312,6 +341,7 @@ export class SessionManager {
   private readonly graceMs: number
   private readonly idleMs: number
   private readonly cwd: string
+  private readonly log: SessionLogger
   private idleTimer?: NodeJS.Timeout
 
   constructor(opts: SessionManagerOptions) {
@@ -319,11 +349,12 @@ export class SessionManager {
     this.graceMs = opts.graceMs ?? DEFAULT_GRACE_MS
     this.idleMs = opts.idleMs ?? DEFAULT_IDLE_MS
     this.cwd = opts.cwd ?? process.cwd()
+    this.log = opts.log ?? (() => {})
   }
 
   create(opts: CreateSessionOptions): Session {
     const id = randomBytes(16).toString('hex')
-    const s = new Session(id, { ...opts, cwd: opts.cwd ?? this.cwd }, this.graceMs)
+    const s = new Session(id, { ...opts, cwd: opts.cwd ?? this.cwd }, this.graceMs, this.log)
     this.sessions.set(id, s)
     this.writePidRecord(s)
     this.ensureIdleTimer()
@@ -343,7 +374,8 @@ export class SessionManager {
   remove(id: string): boolean {
     const s = this.sessions.get(id)
     if (!s) return false
-    s.kill()
+    this.log('info', `session remove id=${id} pid=${s.pid}`)
+    s.kill('remove')
     s.dispose()
     this.sessions.delete(id)
     this.removePidRecord(id)
@@ -418,7 +450,8 @@ export class SessionManager {
             continue
           }
           if (s.attached === 0 && now - s.lastActiveAt > this.idleMs) {
-            s.kill()
+            this.log('info', `session idle-reap id=${id} 空闲 ${Math.round((now - s.lastActiveAt) / 60000)}min`)
+            s.kill('idle')
             s.dispose()
             this.sessions.delete(id)
             this.removePidRecord(id)

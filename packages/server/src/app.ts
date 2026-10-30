@@ -117,6 +117,10 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
   const sessions = new SessionManager({
     pidDir: resolve(tmpDir, 'sessions'),
     cwd: REPO_ROOT,
+    log: (level, msg) => {
+      if (level === 'warn') app.log.warn(msg)
+      else app.log.info(msg)
+    },
   })
   // 不 await：启动不该被 taskkill 拖住，几毫秒后自己跑完
   void sessions.reapOrphans()

@@ -136,7 +136,7 @@ ahk.bat 就是桥协议的客户端，exec 驱动通过它的子命令获得全�
 **2026-10-30 改**：P5 不再是「local / ssh 两个驱动」，而是**一个终端**。设计与验收全在 [06-terminal.md](06-terminal.md)，这里只留它与驱动层的边界。
 
 - **驱动**（`packages/drivers`）：只服务「片段执行」——一次性、整段返回、有退出码。本期仍然只有 `exec`。
-- **会话**（`packages/server` 的 `SessionManager`）：PTY / ssh 的 shell channel——长驻、流式、双向。它**不实现 `Driver` 接口**，也不参与 `RunRequest` / `RunEvent`。硬塞进去会让两个模型互相污染：一个要退出码，一个没有退出码。
+- **会话**（`packages/server` 的 `SessionManager`）：PTY——长驻、流式、双向。它**不实现 `Driver` 接口**，也不参与 `RunRequest` / `RunEvent`。硬塞进去会让两个模型互相污染：一个要退出码，一个没有退出码。（SSH 会话 2026-10-30 决定不做，见 06-terminal.md §23.2。）
 - **唯一共享**的是输出解码（BOM / UTF-8 合法性 / GBK 回退）。真需要时再抽，不预支。
 - `hosts.yaml` 里 `home-win` / `vps` 继续占位，但仍是 `reserved`——**终端不读 `target`，它有自己的一套连接列表**。
 
