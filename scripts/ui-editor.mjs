@@ -159,7 +159,12 @@ try {
 
   console.log(`[${width}×${height}]`)
   const opened = await evalJs(`(() => {
-    const card = [...document.querySelectorAll('button.card')].find((b) => b.textContent.includes(${JSON.stringify(probeId)}))
+    // 精确按卡片第二行的 id 匹配：目标 id 是副本 id 的前缀，
+    // includes() 会把副本那张也认成目标，于是删错条目
+    const card = [...document.querySelectorAll('button.card')].find((b) => {
+      const meta = (b.querySelector('.card-meta')?.textContent ?? '').trim()
+      return meta === ${JSON.stringify(probeId)} || meta.startsWith(${JSON.stringify(probeId)} + ' ')
+    })
     if (!card) return 'no-card'
     const edit = card.querySelector('.card-edit')
     if (!edit) return 'no-edit-icon'
@@ -259,9 +264,119 @@ try {
   }
   check('保存的内容真的落盘了', readTitle === newTitle, `${readBack.status} ${String(readTitle)}`)
 
+  // ——— 原文模式 ———
+  // 这一段是 P6 第二轮的关键验证：表单保存会把 YAML 重排（注释丢），
+  // 原文保存必须逐字留住。所以这里加一行注释，存完再读回来找它。
+  await evalJs(`(() => {
+    // 精确按卡片第二行的 id 匹配：目标 id 是副本 id 的前缀，
+    // includes() 会把副本那张也认成目标，于是删错条目
+    const card = [...document.querySelectorAll('button.card')].find((b) => {
+      const meta = (b.querySelector('.card-meta')?.textContent ?? '').trim()
+      return meta === ${JSON.stringify(probeId)} || meta.startsWith(${JSON.stringify(probeId)} + ' ')
+    })
+    card?.querySelector('.card-edit')?.click()
+    return 'ok'
+  })()`)
+  await sleep(1400)
+  const switched = await evalJs(`(() => {
+    const tab = [...document.querySelectorAll('.editor-tab')].find((b) => b.textContent.trim() === '原文')
+    if (!tab) return 'no-tab'
+    tab.click()
+    return 'clicked'
+  })()`)
+  check('切到原文模式', switched === 'clicked', String(switched))
+  await sleep(900)
+
+  const rawState = await evalJs(`(() => {
+    const ta = document.querySelector('.raw-text')
+    const gutter = document.querySelector('.raw-gutter')
+    if (!ta || !gutter) return null
+    const cs = getComputedStyle(ta)
+    const gs = getComputedStyle(gutter)
+    return {
+      length: ta.value.length,
+      lines: ta.value.split('\\n').length,
+      gutterLines: gutter.textContent.trim().split('\\n').length,
+      // 行号与正文必须同字号、同行高、同上下内边距，否则第一行就对不齐
+      aligned:
+        cs.fontSize === gs.fontSize &&
+        cs.lineHeight === gs.lineHeight &&
+        cs.paddingTop === gs.paddingTop,
+      wrapped: cs.whiteSpace,
+    }
+  })()`)
+  check('原文模式读到了内容', rawState !== null && rawState.length > 20, JSON.stringify(rawState))
+  check(
+    '行号列与正文行数一致',
+    rawState !== null && rawState.lines === rawState.gutterLines,
+    JSON.stringify(rawState),
+  )
+  check('行号与正文对齐（同字号/行高/padding）', rawState?.aligned === true, JSON.stringify(rawState))
+  check('原文不自动折行', rawState?.wrapped === 'pre', String(rawState?.wrapped))
+
+  const marker = `# ui-editor 保留注释 ${Date.now().toString(36)}`
+  const rawShot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
+  writeFileSync(out.replace(/\.png$/, '-raw.png'), Buffer.from(rawShot.result.data, 'base64'))
+  const injected = await evalJs(`(() => {
+    const ta = document.querySelector('.raw-text')
+    if (!ta) return 'no-textarea'
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(ta, ${JSON.stringify(marker)} + '\\n' + ta.value)
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+    return ta.value.startsWith(${JSON.stringify(marker)}) ? 'ok' : 'not-applied'
+  })()`)
+  check('能在原文顶部插一行注释', injected === 'ok', String(injected))
+
+  await evalJs(`(() => {
+    const btn = [...document.querySelectorAll('.modal-actions .btn')].find((b) => b.textContent.includes('保存'))
+    btn?.click()
+    return 'ok'
+  })()`)
+  await sleep(1600)
+  const rawSaved = await apiCall('GET', `/api/snippets/${encodeURIComponent(probeId)}/raw`)
+  let rawText = ''
+  try {
+    rawText = JSON.parse(rawSaved.body).yaml ?? ''
+  } catch {
+    // 下面断言会报出来
+  }
+  check('原文保存后注释还在（这条只有原文路径能过）', rawText.includes(marker), rawText.slice(0, 120))
+  // 表单保存时改的标题不该被原文保存冲掉
+  check('原文保存没有冲掉刚才表单改的标题', rawText.includes(newTitle), rawText.slice(0, 200))
+
+  // 另存副本：点一下应生成 `<id>-copy`
+  await evalJs(`(() => {
+    // 精确按卡片第二行的 id 匹配：目标 id 是副本 id 的前缀，
+    // includes() 会把副本那张也认成目标，于是删错条目
+    const card = [...document.querySelectorAll('button.card')].find((b) => {
+      const meta = (b.querySelector('.card-meta')?.textContent ?? '').trim()
+      return meta === ${JSON.stringify(probeId)} || meta.startsWith(${JSON.stringify(probeId)} + ' ')
+    })
+    card?.querySelector('.card-edit')?.click()
+    return 'ok'
+  })()`)
+  await sleep(1400)
+  const dupClicked = await evalJs(`(() => {
+    const b = [...document.querySelectorAll('.modal-actions .btn')].find((x) => x.textContent.includes('另存副本'))
+    if (!b) return 'no-btn'
+    b.click()
+    return 'clicked'
+  })()`)
+  await sleep(1600)
+  const copyId = `${probeId}-copy`
+  const copyDetail = await apiCall('GET', `/api/snippets/${encodeURIComponent(copyId)}/detail`)
+  check('另存副本 → 生成 <id>-copy', dupClicked === 'clicked' && copyDetail.status === 200, `${dupClicked} ${copyDetail.status}`)
+  const copyDel = await apiCall('DELETE', `/api/snippets/${encodeURIComponent(copyId)}`)
+  check('副本能被删掉（不留垃圾）', copyDel.status === 200, String(copyDel.status))
+
   // 删除要连点两次：第一次只换文案
   await evalJs(`(() => {
-    const card = [...document.querySelectorAll('button.card')].find((b) => b.textContent.includes(${JSON.stringify(probeId)}))
+    // 精确按卡片第二行的 id 匹配：目标 id 是副本 id 的前缀，
+    // includes() 会把副本那张也认成目标，于是删错条目
+    const card = [...document.querySelectorAll('button.card')].find((b) => {
+      const meta = (b.querySelector('.card-meta')?.textContent ?? '').trim()
+      return meta === ${JSON.stringify(probeId)} || meta.startsWith(${JSON.stringify(probeId)} + ' ')
+    })
     card?.querySelector('.card-edit')?.click()
     return 'ok'
   })()`)
@@ -288,7 +403,12 @@ try {
   const afterDelete = await evalJs(`(() => ({
     toast: document.querySelector('.toast')?.textContent ?? null,
     editorOpen: !!document.querySelector('.modal.editor'),
-    cardStillThere: [...document.querySelectorAll('button.card')].some((b) => b.textContent.includes(${JSON.stringify(probeId)})),
+    error: document.querySelector('.editor .form-error')?.textContent ?? null,
+    actions: [...document.querySelectorAll('.modal-actions .btn')].map((x) => x.textContent.trim()).join('|'),
+    cardStillThere: [...document.querySelectorAll('button.card')].some((b) => {
+      const meta = (b.querySelector('.card-meta')?.textContent ?? '').trim()
+      return meta === ${JSON.stringify(probeId)} || meta.startsWith(${JSON.stringify(probeId)} + ' ')
+    }),
   }))()`)
   check('第二次点击真删了', String(afterDelete.toast ?? '').includes('已删除'), JSON.stringify(afterDelete))
   check('删除后卡片消失', afterDelete.cardStillThere === false)
@@ -302,9 +422,11 @@ try {
   }
   chrome.kill()
   // 收尾：不管前面成没成，临时片段都不该留在库里
-  const leftover = await apiCall('DELETE', `/api/snippets/${encodeURIComponent(probeId)}`)
-  if (leftover.status === 200) console.log('临时片段已清理')
-  else if (leftover.status !== 404) console.warn(`临时片段清理失败（${leftover.status}）`)
+  for (const id of [probeId, `${probeId}-copy`]) {
+    const leftover = await apiCall('DELETE', `/api/snippets/${encodeURIComponent(id)}`)
+    if (leftover.status === 200) console.log(`临时片段 ${id} 已清理`)
+    else if (leftover.status !== 404) console.warn(`临时片段 ${id} 清理失败（${leftover.status}）`)
+  }
 }
 
 console.log(`\n结果: ${problems.length === 0 ? '编辑器 UI 通过' : `${problems.length} 项失败`}`)

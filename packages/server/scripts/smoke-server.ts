@@ -155,6 +155,23 @@ writeFixture(
   ].join('\n'),
 )
 
+// 原文编辑用例的样本：注释、字段顺序、单引号都是「表单保存会抹掉、原文保存要保住」的东西
+writeFixture(
+  'snippets/状态/raw-probe.yaml',
+  [
+    '# 这一行注释必须活下来',
+    'id: raw-probe',
+    'title: 原文用例',
+    'group: 状态',
+    // 故意把 tags 写在 title 前面：表单保存会按固定顺序重排
+    'tags: [raw]',
+    'steps:',
+    '  - do: run',
+    "    cmd: 'echo raw'",
+    '',
+  ].join('\n'),
+)
+
 const { app, store } = buildApp({
   dataDir: FIXTURE,
   webDist: join(REPO_ROOT, 'packages/web/dist'),
@@ -237,11 +254,11 @@ const hb = h.json()
 check('GET /api/health → 200', h.statusCode === 200)
 check('health.ok === true', hb.ok === true)
 check('health.bridgeUp 是布尔值', typeof hb.bridgeUp === 'boolean', JSON.stringify(hb))
-check('health.snippets = 7（8 条里 1 条重复）', hb.snippets === 7, JSON.stringify(hb))
 check('health.quarantined = 1', hb.quarantined === 1, JSON.stringify(hb))
-
 // 3. 列表与单个
 const list = (await app.inject({ method: 'GET', url: '/api/snippets', headers: auth })).json()
+// 数量断言不写死：加一条 fixture 就会红。真正要钉的是「health 与列表说的是同一件事」
+check('health.snippets 与列表长度一致', hb.snippets === list.length, `${hb.snippets} vs ${list.length}`)
 check('列表含 click-instance', list.some((s: { id: string }) => s.id === 'click-instance'))
 check('kill-demo 标记 danger', list.find((s: { id: string }) => s.id === 'kill-demo')?.danger === true)
 check('列表不泄漏文件路径', list.every((s: Record<string, unknown>) => !('file' in s)))
@@ -527,6 +544,76 @@ if (!bridgeUp) {
 }
 
 // 10. 片段 CRUD（P6）—— 放在最后，因为它真的会改 FIXTURE 里的文件
+const rawGet = await app.inject({
+  method: 'GET',
+  url: '/api/snippets/raw-probe/raw',
+  headers: auth,
+})
+const rawBody = rawGet.json() as { yaml?: string; mtimeMs?: number }
+check(
+  'GET raw → 读到原文且带注释',
+  rawGet.statusCode === 200 && String(rawBody.yaml).includes('# 这一行注释必须活下来'),
+  rawGet.body.slice(0, 120),
+)
+
+const RAW_FILE = join(FIXTURE, 'snippets', '状态', 'raw-probe.yaml')
+const editedYaml = [
+  '# 这一行注释必须活下来',
+  '# 第二行注释：表单保存会把它抹掉，原文保存必须留住',
+  'id: raw-probe',
+  'title: 改过的标题',
+  'group: 状态',
+  'tags: [raw]',
+  'steps:',
+  '  - do: run',
+  "    cmd: 'echo raw2'",
+  '',
+].join('\n')
+
+const rawPut = await app.inject({
+  method: 'PUT',
+  url: '/api/snippets/raw-probe/raw',
+  headers: auth,
+  payload: { yaml: editedYaml, mtimeMs: rawBody.mtimeMs },
+})
+const rawPutBody = rawPut.json() as { mtimeMs?: number }
+check('PUT raw → 200', rawPut.statusCode === 200, rawPut.body)
+const onDisk = readFileSync(RAW_FILE, 'utf8')
+check('原文保存后注释还在', onDisk.includes('# 第二行注释'), onDisk.slice(0, 160))
+// 这条是本期最关键的断言：原文路径不能走 stringify
+check('原文保存后逐字一致（没被重排）', onDisk.trim() === editedYaml.trim(), JSON.stringify(onDisk.slice(0, 200)))
+check('原文保存后索引立刻更新', store.get('raw-probe')?.title === '改过的标题')
+
+const badYaml = await app.inject({
+  method: 'PUT',
+  url: '/api/snippets/raw-probe/raw',
+  headers: auth,
+  payload: { yaml: 'id: [unclosed\nsteps: []\n' },
+})
+check(
+  '坏 YAML → 400 且带行号',
+  badYaml.statusCode === 400 && /第 \d+ 行/.test(badYaml.body),
+  badYaml.body,
+)
+check('坏 YAML 没有被写盘', readFileSync(RAW_FILE, 'utf8').includes('# 第二行注释'))
+
+const rawRenamed = await app.inject({
+  method: 'PUT',
+  url: '/api/snippets/raw-probe/raw',
+  headers: auth,
+  payload: {
+    yaml: editedYaml.replace('id: raw-probe', 'id: raw-probe2'),
+    mtimeMs: rawPutBody.mtimeMs,
+  },
+})
+check(
+  '原文里改 id → 文件搬家',
+  rawRenamed.statusCode === 200 && (rawRenamed.json() as { renamed?: boolean }).renamed === true,
+  rawRenamed.body,
+)
+check('搬家后旧文件消失', !existsSync(RAW_FILE))
+await app.inject({ method: 'DELETE', url: '/api/snippets/raw-probe2', headers: auth })
+
 const crudDetail = await app.inject({
   method: 'GET',
   url: '/api/snippets/check-instence/detail',
@@ -680,6 +767,10 @@ const trashDir = join(FIXTURE, 'snippets', '.trash')
 check(
   '删除留了回收站副本',
   existsSync(trashDir) && readdirSync(trashDir).some((f) => f.startsWith('smoke-renamed-')),
+)
+check(
+  '删除时顺手清掉 .bak（否则每跑一轮回归就多一条看不见的垃圾）',
+  !existsSync(join(FIXTURE, 'snippets', '状态', 'smoke-renamed.yaml.bak')),
 )
 check(
   '回收站副本不会被当成片段加载',

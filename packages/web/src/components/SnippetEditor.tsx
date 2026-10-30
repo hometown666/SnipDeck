@@ -4,6 +4,7 @@ import {
   api,
   type HostView,
   type SnippetDetail,
+  type SnippetSaveInput,
   type SnippetStep,
   type SnippetVarSpec,
 } from '../api'
@@ -220,6 +221,18 @@ export function SnippetEditor({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  /**
+   * 表单 / 原文。
+   *
+   * 两条路径写同一份文件，但**产出的文本完全不同**：表单会 `stringify`（注释丢、
+   * 字段顺序重排），原文会逐字落盘。所以不是「一个编辑器的两种皮肤」，
+   * 而是两个工具，共用同一个 mtime 守卫。
+   */
+  const [mode, setMode] = useState<'form' | 'raw'>('form')
+  const [raw, setRaw] = useState<string | null>(null)
+  const [rawMtimeMs, setRawMtimeMs] = useState<number | undefined>(undefined)
+  const [rawLoading, setRawLoading] = useState(false)
+  const gutterRef = useRef<HTMLPreElement | null>(null)
   const idRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -253,6 +266,20 @@ export function SnippetEditor({
 
   const patch = useCallback((p: Partial<Form>) => setForm((f) => ({ ...f, ...p })), [])
 
+  // 原文按需加载：只在真的切过去时读一次盘，免得每次打开编辑器都多一个请求
+  useEffect(() => {
+    if (mode !== 'raw' || !snippetId || raw !== null || rawLoading) return
+    setRawLoading(true)
+    api
+      .snippetRaw(snippetId)
+      .then((r) => {
+        setRaw(r.yaml)
+        setRawMtimeMs(r.mtimeMs)
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setRawLoading(false))
+  }, [mode, snippetId, raw, rawLoading])
+
   function patchStep(i: number, p: Partial<StepRow>) {
     setForm((f) => ({ ...f, steps: f.steps.map((s, k) => (k === i ? { ...s, ...p } : s)) }))
   }
@@ -275,16 +302,16 @@ export function SnippetEditor({
     setForm((f) => ({ ...f, meta: f.meta.map((m, k) => (k === i ? { ...m, ...p } : m)) }))
   }
 
-  async function save() {
-    setError(null)
+  /** 把表单收敛成 payload。返回 string 表示哪里不对——保存和复制共用这一份收敛逻辑 */
+  function buildPayload(): SnippetSaveInput | string {
     const id = form.id.trim()
-    if (!id) return setError('id 不能为空')
-    if (form.steps.length === 0) return setError('至少要有一个步骤')
+    if (!id) return 'id 不能为空'
+    if (form.steps.length === 0) return '至少要有一个步骤'
 
     const steps: SnippetStep[] = []
     for (const [i, r] of form.steps.entries()) {
       const s = stepOf(r, i)
-      if (typeof s === 'string') return setError(s)
+      if (typeof s === 'string') return s
       steps.push(s)
     }
 
@@ -292,8 +319,8 @@ export function SnippetEditor({
     const names = new Set<string>()
     for (const [i, r] of form.vars.entries()) {
       const name = r.name.trim()
-      if (!name) return setError(`第 ${i + 1} 个变量没有名字`)
-      if (names.has(name)) return setError(`变量名重复：${name}`)
+      if (!name) return `第 ${i + 1} 个变量没有名字`
+      if (names.has(name)) return `变量名重复：${name}`
       names.add(name)
       const spec: SnippetVarSpec = {}
       if (r.prompt.trim()) spec.prompt = r.prompt.trim()
@@ -311,11 +338,11 @@ export function SnippetEditor({
     const meta: Record<string, unknown> = { ...hiddenMeta }
     for (const [i, r] of form.meta.entries()) {
       const key = r.key.trim()
-      if (!key) return setError(`第 ${i + 1} 行 meta 没有键`)
+      if (!key) return `第 ${i + 1} 行 meta 没有键`
       meta[key] = r.value
     }
 
-    const payload = {
+    return {
       id,
       title: form.title.trim() || undefined,
       group: form.group.trim() || undefined,
@@ -331,6 +358,30 @@ export function SnippetEditor({
       steps,
       mtimeMs,
     }
+  }
+
+  async function save() {
+    setError(null)
+
+    // 原文模式：不碰表单，直接把文本框里的东西交给服务端。
+    // 这条路径刻意不复用 buildPayload——一旦经过表单就必然被 stringify 重排，
+    // 而用户选原文模式就是为了「别动我的排版」。
+    if (mode === 'raw') {
+      if (!snippetId) return setError('原文模式只在编辑已有片段时可用')
+      if (raw === null) return setError('原文还没加载完')
+      setSaving(true)
+      try {
+        const r = await api.saveSnippetRaw(snippetId, raw, rawMtimeMs)
+        onSaved(r.renamed ? `已保存（id 改为 ${r.id}）` : '已保存（原文，未重排）')
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+        setSaving(false)
+      }
+      return
+    }
+
+    const payload = buildPayload()
+    if (typeof payload === 'string') return setError(payload)
 
     setSaving(true)
     try {
@@ -339,7 +390,7 @@ export function SnippetEditor({
         onSaved(r.renamed ? `已保存（id 改为 ${r.id}）` : '已保存')
       } else {
         await api.createSnippet(payload)
-        onSaved(`已新建 ${id}`)
+        onSaved(`已新建 ${payload.id}`)
       }
     } catch (e) {
       if (e instanceof ApiError && (e.status === 409 || e.status === 400)) {
@@ -348,6 +399,28 @@ export function SnippetEditor({
         setError(e instanceof Error ? e.message : String(e))
       }
     } finally {
+      setSaving(false)
+    }
+  }
+
+  /**
+   * 另存为副本：`<id>-copy`。
+   *
+   * 不在这里猜一个「不重复的 id」——撞了就撞了，让服务端回 409 说清楚，
+   * 用户自己改一下就行。悄悄改成 `-copy2` 只会让人下次找不着。
+   */
+  async function duplicate() {
+    setError(null)
+    if (!editing) return setError('先保存一次再复制')
+    const payload = buildPayload()
+    if (typeof payload === 'string') return setError(payload)
+    const newId = `${payload.id}-copy`
+    setSaving(true)
+    try {
+      await api.createSnippet({ ...payload, id: newId, mtimeMs: undefined })
+      onSaved(`已复制为 ${newId}`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
       setSaving(false)
     }
   }
@@ -376,16 +449,73 @@ export function SnippetEditor({
     <div className="modal-mask" onClick={onClose}>
       <div className="modal editor" onClick={(e) => e.stopPropagation()}>
         <h3>{editing ? '编辑片段' : '新建片段'}</h3>
+        <div className="editor-tabs">
+          <button
+            type="button"
+            className={`editor-tab${mode === 'form' ? ' on' : ''}`}
+            onClick={() => setMode('form')}
+          >
+            表单
+          </button>
+          <button
+            type="button"
+            className={`editor-tab${mode === 'raw' ? ' on' : ''}`}
+            disabled={!editing}
+            title={editing ? '直接编辑 YAML 原文，保存时不重排' : '先保存一次才能看原文'}
+            onClick={() => setMode('raw')}
+          >
+            原文
+          </button>
+        </div>
         <p className="modal-sub">
-          {editing
-            ? '保存会重写整份 YAML：注释与字段顺序不保留，内容保真。'
-            : '新片段按分组落到 snippets/<分组>/ 下，id 必须全库唯一。'}
+          {mode === 'raw'
+            ? '保存时逐字落盘：注释、字段顺序、缩进都不动。校验只到「合法 YAML + 字段齐全」。'
+            : editing
+              ? '表单保存会重排整份 YAML：注释与字段顺序不保留。想保住排版切到「原文」。'
+              : '新片段按分组落到 snippets/<分组>/ 下，id 必须全库唯一。'}
         </p>
 
         {loading ? (
           <p className="empty">加载中…</p>
         ) : loadError ? (
           <p className="form-error">{loadError}</p>
+        ) : mode === 'raw' ? (
+          rawLoading || raw === null ? (
+            <p className="empty">读取原文…</p>
+          ) : (
+            <div className="raw-wrap">
+              {/* 行号列：与 textarea 共享 line-height，滚动时靠 onScroll 同步。
+                  没有行号的话，服务端回的「第 12 行第 3 列」用户只能自己数。 */}
+              <pre className="raw-gutter" ref={gutterRef} aria-hidden="true">
+                {raw
+                  .split('\n')
+                  .map((_, i) => i + 1)
+                  .join('\n')}
+              </pre>
+              <textarea
+                className="raw-text"
+                value={raw}
+                spellCheck={false}
+                wrap="off"
+                aria-label="YAML 原文"
+                onChange={(e) => setRaw(e.target.value)}
+                onScroll={(e) => {
+                  if (gutterRef.current) gutterRef.current.scrollTop = e.currentTarget.scrollTop
+                }}
+                onKeyDown={(e) => {
+                  // Tab 插两个空格，而不是把焦点移走：YAML 的层级全靠缩进
+                  if (e.key !== 'Tab') return
+                  e.preventDefault()
+                  const el = e.currentTarget
+                  const { selectionStart: from, selectionEnd: to, value } = el
+                  setRaw(`${value.slice(0, from)}  ${value.slice(to)}`)
+                  requestAnimationFrame(() => {
+                    el.selectionStart = el.selectionEnd = from + 2
+                  })
+                }}
+              />
+            </div>
+          )
         ) : (
           <>
             <div className="editor-grid">
@@ -714,6 +844,16 @@ export function SnippetEditor({
               onBlur={() => setConfirmDelete(false)}
             >
               {confirmDelete ? '确认删除？' : '删除'}
+            </button>
+          )}
+          {editing && mode === 'form' && (
+            <button
+              className="btn ghost"
+              disabled={saving || loading}
+              title={`另存为 ${form.id.trim()}-copy`}
+              onClick={() => void duplicate()}
+            >
+              另存副本
             </button>
           )}
           <span className="spacer" />

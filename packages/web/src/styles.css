@@ -1191,6 +1191,80 @@ body {
   border-top: 1px solid var(--border);
   padding: 10px 0 2px;
   margin-top: 12px;
+  /* 删除 / 另存副本 / 取消 / 保存 四颗按钮，390 宽一行放不下 */
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+/* ——— 表单 / 原文 两个模式 ——— */
+.editor-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 10px 0 6px;
+}
+
+.editor-tab {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.editor-tab.on {
+  background: var(--accent-soft);
+  border-color: #cfe9e0;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.editor-tab:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 原文编辑区：行号列 + 文本框。两者必须共用字号 / 行高 / 上下 padding，
+   差一点第一行就对不齐，而「对不齐」正是行号失去意义的原因。 */
+.raw-wrap {
+  display: flex;
+  height: 48vh;
+  min-height: 240px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.editor .raw-wrap pre,
+.editor textarea.raw-text {
+  margin: 0;
+  padding: 10px 8px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  border: 1px solid transparent;
+}
+
+.editor .raw-wrap pre {
+  flex: 0 0 auto;
+  min-width: 42px;
+  text-align: right;
+  color: var(--text-2);
+  background: var(--bg);
+  overflow: hidden;
+  user-select: none;
+}
+
+.editor textarea.raw-text {
+  flex: 1;
+  min-width: 0;
+  border-left-color: var(--border);
+  border-radius: 0;
+  resize: none;
+  white-space: pre;
+  overflow: auto;
 }
 
 .editor-section h4 {
@@ -1434,5 +1508,11 @@ body {
 
   .editor-row .mini-check {
     justify-self: start;
+  }
+
+  /* 软键盘一弹就剩不到 300px，48vh 会把底部按钮顶出去 */
+  .raw-wrap {
+    height: 38vh;
+    min-height: 180px;
   }
 }

@@ -50,6 +50,8 @@
 | GET | `/api/snippets` | — | `SnippetView[]`（**不含**服务器文件路径） |
 | GET | `/api/snippets/:id` | — | `SnippetView`；不存在 404 |
 | GET | `/api/snippets/:id/detail` | — | 编辑器用：完整 `id/title/group/target/shell/tags/danger/meta/vars/steps` + `relPath`（相对 snippets 根）+ `mtimeMs`（冲突检测）；不存在 404 |
+| GET | `/api/snippets/:id/raw` | — | `{id,relPath,yaml,mtimeMs}`：磁盘上的 YAML **原文**（注释、字段顺序、`>` 折叠块都还在） |
+| PUT | `/api/snippets/:id/raw` | `{yaml,mtimeMs?}` | 原文保存：**落盘的就是这段文本**，不经过 `stringify`。YAML 解析失败 400 且错误带「第 N 行第 M 列」；改 `id` 同样会搬家 |
 | POST | `/api/snippets` | 完整片段对象（不含 `file`） | 201 `{ok,id,relPath,created,mtimeMs}`；校验失败 400（`problems[]` 逐条给原因）；id 或落点已存在 409 |
 | PUT | `/api/snippets/:id` | 同上 + `mtimeMs?` | 200 `{ok,id,relPath,renamed,mtimeMs}`；`body.id` 与 URL 不同即视作**改名**（文件跟着搬）；`mtimeMs` 与磁盘不符 409（不覆盖别人的改动） |
 | DELETE | `/api/snippets/:id` | — | 200 `{ok,id,backup}`；删除前先把副本放进 `snippets/.trash/<id>-<时间戳>.yaml.txt` |
@@ -62,6 +64,19 @@
 `/api/run` 的目标入参优先级：`targets[]` > `target` > 片段 `target` > hosts 的 `default`。`targets[]` 里**同一目标可以重复**（同目标多开），最多 8 个。
 
 `/api/run` 的失败码都在**开流之前**判定：snippet 不存在 → 404；danger 未确认 / `targets` 非数组或为空 / 目标未知 / 目标 `reserved` → 400（多目标里**任一** reserved 就整条拒绝）。开流之后只剩 `error` 事件。
+
+**两条写路径的差别（这不是实现细节，是产品承诺）**
+
+| | `POST/PUT /api/snippets`（表单） | `PUT /api/snippets/:id/raw`（原文） |
+|---|---|---|
+| 落盘内容 | `stringify` 之后的 YAML | **用户给的文本，逐字** |
+| 注释 | 丢 | 保留 |
+| 字段顺序 / 引号风格 | 按固定顺序重排 | 保留 |
+| `meta.note` 的 `>` 折叠块 | 变成普通多行串 | 保留 |
+| 校验强度 | `validateSnippet` + 序列化后自解析 | 解析（带行列号）+ `validateSnippet` |
+| 适合 | 手机上改字段、新建 | 写注释、调排版、改嵌套 meta |
+
+两条路径共用同一套守卫：`mtimeMs` 冲突、`id` 全库唯一、落点越界、`.bak`、原子写、写后 `reindex`。所以「表单改一半切到原文保存」不会绕过任何一条。
 
 **写入语义（POST / PUT / DELETE）**
 

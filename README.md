@@ -11,7 +11,7 @@
 - **一键执行**：实时输出（SSE 流），结束给退出码与耗时
 - **危险动作**：`danger: true` 的片段先确认，并可预览渲染后的最终命令行
 - **单车道队列**：`command.txt` 只能一条一条来，走桥的命令严格 FIFO，前端会显示排队时长
-- **网页里改片段**（P6）：顶栏 `＋` 新建（快捷键 `N`）、卡片右下角 `✎` 编辑（`E`）。结构化表单覆盖 vars / steps / meta 全字段；改 `id` 会自动搬文件；删除进 `snippets/.trash/`。编辑期间文件被别人改过会 409，不静默覆盖
+- **网页里改片段**（P6）：顶栏 `＋` 新建（快捷键 `N`）、卡片右下角 `✎` 编辑（`E`）。两种模式——**表单**覆盖 vars / steps / meta 全字段（保存会重排 YAML），**原文**直接改 YAML 文本（逐字落盘，注释和排版都留住）。改 `id` 会自动搬文件；「另存副本」按 `<id>-copy` 新建；删除进 `snippets/.trash/`。编辑期间文件被别人改过会 409，不静默覆盖
 - **CLI**：任意 SSH 终端（Termius、手机、iPad）里 `snip run <id>`
 - **执行目标**：`win-desktop`（exec 驱动，经 `ahk.bat` 驱动桌面 GUI）
 - **多目标执行**：卡片右上角 `⊕` 打开目标选择器；**同一个目标可以重复添加**——只有一台可执行机器时，这就是「同目标多开」，结果在抽屉里并列成 N 块面板，事件按目标分流
@@ -105,7 +105,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-server.ps1
 
 ## 写一条片段
 
-放在 `data/snippets/<分组>/<名字>.yaml`，目录就是分组（也可以点网页顶栏 `＋` 新建）：
+放在 `data/snippets/<分组>/<名字>.yaml`，目录就是分组（也可以点网页顶栏 `＋` 新建，或在编辑器里切「原文」直接改 YAML）：
 
 ```yaml
 id: click-instance
@@ -180,7 +180,7 @@ data/
 ## 测试
 
 ```bash
-npm test     # typecheck + lint + ps1 编码 + 队列串行 + 命令保真度 + 搜索 + expect + 导入 + 会话 + API 冒烟（冒烟 94 项）
+npm test     # typecheck + lint + ps1 编码 + 队列串行 + 命令保真度 + 搜索 + expect + 导入 + 会话 + API 冒烟（冒烟 103 项）
 ```
 
 单项：
@@ -198,6 +198,7 @@ npm run ui:shot -- http://127.0.0.1:7878/ 390 844 data/tmp/ui.png   # 移动端�
 npm run ui:queue                                   # 顶栏「排队 N」徽标可见性（需服务 + 桥都在线）
 npm run ui:multi                                   # 多目标：目标选择器 + 并列面板（需服务在线）
 npm run ui:history                                 # 运行历史：列表 + 抽屉回放（需服务在线）
+npm run ui:editor                                 # 片段编辑器：开/改/存/原文/副本/删（26 项，需服务在线）
 npm run test:session-reap                          # 会话回收，**真 60 秒**两条路径（约 70s，不进 npm test）
 npm run lint                                       # eslint：只拦错，不排格式
 npm run check:ps1                                  # .ps1 必须 UTF-8 with BOM 且语法可解析（PS 5.1 的坑）

@@ -181,3 +181,11 @@
   - **修 ISSUE-024：UI 脚本的「390」其实是 427**。`mobile: true` 下不给 `screenWidth/screenHeight` 时 layout viewport 会落在真实窗口宽，只有 `visualViewport` 是 390，且 `scrollWidth === innerWidth` 的判据恒真——这个假阴性藏了很久。顺带修掉真 390 下顶栏把「片段/终端」压成竖排的问题。
   - 新增 `npm run test:session-reap`：**真 60 秒**宽限期跑两条回收路径（不进 `npm test`）。实测 62s 回收，日志 `grace-arm → grace-fire(kill=true) → kill(reason=grace)` 闭环；ISSUE-020 从「待观察」改「已验证（原始故障未复现）」。
   - 冒烟 66 → **94** 条；主包 gzip 55.92 → 60.04KB（+4.12，编辑器进主包），终端 chunk 仍 89.94 按需加载。
+- **v3.1**（2026-10-31，P6 补完：原文模式 + 复制）：
+  - **原文编辑落地**：`GET /api/snippets/:id/raw` 读盘上文本，`PUT .../raw` **逐字落盘**（不经过 `stringify`）。注释、字段顺序、引号风格、`meta.note` 的 `>` 折叠块全部保住。编辑器顶部「表单 / 原文」两个 tab，原文模式左侧行号列与正文共用 `font-size` / `line-height` / `padding-top`，滚动同步；Tab 键插两个空格而不是移走焦点。
+  - **两条写路径共用 `persist()`，校验各自独立**：落盘（目标定位 / mtime 冲突 / id 占用 / `.bak` / 原子写 / 删旧文件）抽成同一个函数——少做一样就是静默丢数据；校验不能合并，合并的结果必然是「原文也被 stringify」。
+  - 原文的 YAML 解析错误带行列号：`第 1 行第 6 列：…`，配合行号列能直接定位。
+  - **另存副本**：`<id>-copy` 新建一条。不自动找不重复的 id，撞了就让服务端回 409。
+  - `meta` 里非字符串的值（对象/数组）仍然不展示在表单里，但**现在可以切「原文」改**。
+  - 冒烟 94 → **103**（原文读写 9 条：注释存活、逐字一致、坏 YAML 带行号且不落盘、改 id 搬家）；`ui:editor` 16 → **26 项**（原文读内容、行号行数一致、行号与正文对齐、不自动折行、插注释、保存后注释还在、副本生成与清理）。
+  - 修 ISSUE-026：UI 脚本用 `textContent.includes(id)` 找卡片，而 `<id>` 是 `<id>-copy` 的前缀——**差点删错条目**。改成按 `.card-meta` 的 id 精确匹配。

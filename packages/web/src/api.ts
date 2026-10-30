@@ -88,6 +88,14 @@ export type SnippetSaveResult = {
   mtimeMs: number
 }
 
+/** `GET /api/snippets/:id/raw`：磁盘上的 YAML 原文（注释、字段顺序、折叠块都还在） */
+export type SnippetRaw = {
+  id: string
+  relPath: string
+  yaml: string
+  mtimeMs: number
+}
+
 /** 多目标执行时每条事件都带 target / targetIndex（服务端打的标） */
 export type RunEvent =
   | {
@@ -281,6 +289,13 @@ export const api = {
     req<{ ok: boolean; id: string; backup: string }>(
       `/api/snippets/${encodeURIComponent(id)}`,
       { method: 'DELETE' },
+    ),
+  snippetRaw: (id: string) => req<SnippetRaw>(`/api/snippets/${encodeURIComponent(id)}/raw`),
+  /** 原文保存：服务端**不重排**，落盘的就是这段文本 */
+  saveSnippetRaw: (id: string, yaml: string, mtimeMs?: number) =>
+    req<{ ok: boolean; id: string; renamed: boolean; relPath: string; mtimeMs: number }>(
+      `/api/snippets/${encodeURIComponent(id)}/raw`,
+      { method: 'PUT', body: JSON.stringify({ yaml, mtimeMs }) },
     ),
   runs: (limit = 20, snippet?: string) =>
     req<RunListItem[]>(

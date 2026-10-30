@@ -198,19 +198,19 @@ export type SaveResult = {
 }
 
 /**
- * 保存一条片段。校验失败、路径冲突、mtime 冲突都会抛 `SnippetWriteError`，
- * 上层据此回 400 / 409——**不写半份文件，也不静默覆盖**。
+ * 两条写路径共用的落盘动作：目标定位、mtime 冲突、id 占用、`.bak`、原子写、清理旧文件。
+ *
+ * 抽出来的原因：表单保存（`saveSnippet`）和原文保存（`saveSnippetRaw`）在
+ * 「校验」这一层完全不同（一个校验对象、一个校验文本），但**落盘这件事必须一模一样**——
+ * 少一处 `.bak`、少一次 `idOwner` 检查，就会有一条路径偷偷丢东西。
  */
-export function saveSnippet(root: string, draft: SnippetDraft, opts: SaveOptions = {}): SaveResult {
-  const problems = validateSnippet({
-    ...draft,
-    // 空字符串等同于没填，否则 `title: ''` 会过校验却在界面上显示成空白
-    title: draft.title || undefined,
-    group: draft.group || undefined,
-  })
-  if (problems.length > 0) throw new SnippetWriteError('invalid', problems)
-
-  const file = snippetPath(root, draft)
+function persist(
+  root: string,
+  target: { id: string; group?: string },
+  text: string,
+  opts: SaveOptions,
+): SaveResult {
+  const file = snippetPath(root, { id: target.id, group: target.group, steps: [] })
   assertInside(root, file)
 
   const current = opts.currentFile
@@ -221,30 +221,24 @@ export function saveSnippet(root: string, draft: SnippetDraft, opts: SaveOptions
     // 容差 1ms：Windows 上 mtime 精度与 JS 浮点秒的对齐会差一丁点
     if (Math.abs(actual - opts.expectedMtimeMs) > 1) {
       throw new SnippetWriteError('conflict', [
-        '这条片段在你编辑期间被改过了（可能是编辑器或 git pull）。刷新后重试。',
+        '这条片段在你编辑期间被改过了（可能是编辑器、git pull，或编辑器的另一侧）。刷新后重试。',
       ])
     }
   }
 
   // 目标已存在且不是当前文件 = id 撞了。不覆盖别人的片段。
   if (file !== current && existsSync(file)) {
-    const other = file
-    throw new SnippetWriteError('exists', [`目标文件已存在：${relative(root, other)}（换一个 id 或分组）`])
-  }
-
-  // 同一个 id 已经住在别的分组目录里：换目录保存会造出两份同 id 的片段
-  const owner = idOwner(root, draft.id, current)
-  if (owner) {
     throw new SnippetWriteError('exists', [
-      `id "${draft.id}" 已被 ${relative(root, owner).replace(/\\/g, '/')} 占用（id 必须全库唯一）`,
+      `目标文件已存在：${relative(root, file)}（换一个 id 或分组）`,
     ])
   }
 
-  const text = serializeSnippet(draft)
-  // 写盘前再解析一次：stringify 的结果自己也得能被读回来，否则等于存了个炸弹
-  const parseProblems = verifySerialized(text)
-  if (parseProblems.length > 0) {
-    throw new SnippetWriteError('invalid', ['序列化结果无法解析', ...parseProblems])
+  // 同一个 id 已经住在别的分组目录里：换目录保存会造出两份同 id 的片段
+  const owner = idOwner(root, target.id, current)
+  if (owner) {
+    throw new SnippetWriteError('exists', [
+      `id "${target.id}" 已被 ${relative(root, owner).replace(/\\/g, '/')} 占用（id 必须全库唯一）`,
+    ])
   }
 
   // 覆盖任何已有文件之前留一份副本。与 `saveYamlDoc` 的 `.bak` 约定一致：
@@ -272,6 +266,76 @@ export function saveSnippet(root: string, draft: SnippetDraft, opts: SaveOptions
 }
 
 /**
+ * 保存一条片段（表单路径）。校验失败、路径冲突、mtime 冲突都会抛 `SnippetWriteError`，
+ * 上层据此回 400 / 409——**不写半份文件，也不静默覆盖**。
+ *
+ * 注意：这条路径会 `stringify`，所以**注释、字段顺序、引号风格都不保留**。
+ * 想逐字保真用 `saveSnippetRaw`。
+ */
+export function saveSnippet(root: string, draft: SnippetDraft, opts: SaveOptions = {}): SaveResult {
+  const problems = validateSnippet({
+    ...draft,
+    // 空字符串等同于没填，否则 `title: ''` 会过校验却在界面上显示成空白
+    title: draft.title || undefined,
+    group: draft.group || undefined,
+  })
+  if (problems.length > 0) throw new SnippetWriteError('invalid', problems)
+
+  const text = serializeSnippet(draft)
+  // 写盘前再解析一次：stringify 的结果自己也得能被读回来，否则等于存了个炸弹
+  const parseProblems = verifySerialized(text)
+  if (parseProblems.length > 0) {
+    throw new SnippetWriteError('invalid', ['序列化结果无法解析', ...parseProblems])
+  }
+
+  return persist(root, { id: draft.id, group: draft.group }, text, opts)
+}
+
+/** `parseDocument` 的 errors 元素：message 一定有，位置可能没有 */
+type YamlError = { message: string; linePos?: { line: number; col: number }[] }
+
+function formatYamlErrors(errors: YamlError[]): string[] {
+  return errors.map((e) => {
+    const pos = e.linePos?.[0]
+    // 行号从 1 开始，与编辑器左侧的行号列一致；不给行号等于让用户自己数
+    return pos ? `第 ${pos.line} 行第 ${pos.col} 列：${e.message}` : e.message
+  })
+}
+
+export type RawSaveResult = SaveResult & { id: string }
+
+/**
+ * 保存**原文**（编辑器里的 YAML 文本）。
+ *
+ * 与 `saveSnippet` 的区别只有一处、但很关键：**落盘的是用户给的文本本身**，
+ * 不经过 `stringify`。所以注释、字段顺序、引号风格、`meta.note` 的 `>` 折叠块
+ * 全都原样保留——这正是用户选「原文模式」的全部理由。
+ *
+ * 代价是校验更弱：只能确认「是合法 YAML」+「过 `validateSnippet`」，
+ * 字段顺序之类的东西没有约束（也不该有）。
+ */
+export function saveSnippetRaw(
+  root: string,
+  text: string,
+  opts: SaveOptions = {},
+): RawSaveResult {
+  const doc = parseDocument(text)
+  if (doc.errors.length > 0) {
+    throw new SnippetWriteError('invalid', formatYamlErrors(doc.errors as YamlError[]))
+  }
+  const data = doc.toJS() as Record<string, unknown> | null
+  const problems = validateSnippet(data)
+  if (problems.length > 0) throw new SnippetWriteError('invalid', problems)
+
+  const id = String((data as Record<string, unknown>).id)
+  const rawGroup = (data as Record<string, unknown>).group
+  const group = typeof rawGroup === 'string' && rawGroup.trim() ? rawGroup.trim() : undefined
+
+  const saved = persist(root, { id, group }, text, opts)
+  return { ...saved, id }
+}
+
+/**
  * 删除：先拷一份到 `<root>/.trash/`，再删原文件。
  *
  * 备份的扩展名刻意写成 `.yaml.txt`——`loadSnippets()` 只认 `.yaml`/`.yml`，
@@ -284,6 +348,13 @@ export function deleteSnippet(root: string, file: string, id: string): string {
   const backup = join(root, '.trash', `${safeSegment(id, 'snippet')}-${stamp}.yaml.txt`)
   copyFileSync(file, backup)
   unlinkSync(file)
+  // `.bak` 是「上一次保存前的版本」，片段都删了它就没有意义了。
+  // 留着只会在 snippets/ 里堆一堆看不见的垃圾——UI 回归跑几轮就能堆出十几条。
+  try {
+    unlinkSync(`${file}.bak`)
+  } catch {
+    // 没有 .bak 是常态
+  }
   return backup
 }
 

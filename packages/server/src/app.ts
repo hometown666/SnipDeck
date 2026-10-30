@@ -1,4 +1,4 @@
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify'
@@ -17,6 +17,7 @@ import {
   resolveVars,
   runSnippet,
   saveSnippet,
+  saveSnippetRaw,
   type Hosts,
   type HostTarget,
   type RunEvent,
@@ -212,6 +213,54 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
       mtimeMs: statSync(s.file).mtimeMs,
     }
   })
+
+  // 原文模式：读回磁盘上的 YAML 文本本身。表单模式读的是 `toJS()` 之后的对象，
+  // 注释、字段顺序、`>` 折叠块在那一层已经不存在了——想看这些只有一个办法：读原文。
+  app.get<{ Params: { id: string } }>('/api/snippets/:id/raw', async (req, reply) => {
+    const s = store.get(req.params.id)
+    if (!s) return reply.code(404).send({ error: `片段不存在: ${req.params.id}` })
+    return {
+      id: s.id,
+      relPath: relative(snippetsDir, s.file).replace(/\\/g, '/'),
+      yaml: readFileSync(s.file, 'utf8'),
+      mtimeMs: statSync(s.file).mtimeMs,
+    }
+  })
+
+  // 原文保存：**落盘的是这段文本本身**，不经过 stringify。
+  // 所以这里的校验只做到「合法 YAML + 过 validateSnippet」，
+  // 至于排版、注释、字段顺序——那是用户的，不该被服务端重写。
+  app.put<{ Params: { id: string }; Body: { yaml?: unknown; mtimeMs?: unknown } }>(
+    '/api/snippets/:id/raw',
+    async (req, reply) => {
+      const current = store.get(req.params.id)
+      if (!current) return reply.code(404).send({ error: `片段不存在: ${req.params.id}` })
+      const yamlText = req.body?.yaml
+      if (typeof yamlText !== 'string' || !yamlText.trim()) {
+        return reply.code(400).send({ error: 'yaml 必须是非空字符串' })
+      }
+      const expectedMtimeMs =
+        typeof req.body?.mtimeMs === 'number' && Number.isFinite(req.body.mtimeMs)
+          ? req.body.mtimeMs
+          : undefined
+      try {
+        const saved = saveSnippetRaw(snippetsDir, yamlText, {
+          currentFile: current.file,
+          expectedMtimeMs,
+        })
+        store.reindex()
+        return reply.send({
+          ok: true,
+          id: saved.id,
+          renamed: saved.id !== current.id,
+          relPath: saved.relPath,
+          mtimeMs: saved.mtimeMs,
+        })
+      } catch (e) {
+        return sendWriteError(reply, e)
+      }
+    },
+  )
 
   app.post('/api/snippets', async (req, reply) => {
     const draft = asDraft(req.body)
