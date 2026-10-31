@@ -2,6 +2,7 @@
 import { BridgeEnvSection } from './BridgeEnvSection'
 import { HostsSection } from './HostsSection'
 import { RunsSection } from './RunsSection'
+import { Modal } from './Modal'
 
 export function SettingsModal({
   tokenInput,
@@ -27,8 +28,7 @@ export function SettingsModal({
   onHostsChanged?: () => void
 }) {
   return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="modal settings" onClick={(e) => e.stopPropagation()}>
+    <Modal className="settings" onClose={onClose}>
         <h3>访问 token</h3>
         <p className="modal-sub">
           服务端设了 <code>SNIP_TOKEN</code> 时，非本机访问需要它。只存在这台设备的 localStorage。
@@ -55,7 +55,6 @@ export function SettingsModal({
         {showEnv && <BridgeEnvSection />}
         {showEnv && <HostsSection onChanged={onHostsChanged} />}
         {showEnv && <RunsSection />}
-      </div>
-    </div>
+    </Modal>
   )
 }

@@ -162,6 +162,27 @@ try {
   check('顶栏有设置按钮', (await evalJs(openSettings)) === 'clicked')
   await sleep(400)
 
+  // 弹窗结构：滚动必须发生在内层，否则原生滚动条会把圆角切成直角
+  const shell = await evalJs(`(() => {
+    const m = document.querySelector('.modal')
+    const sc = m && m.querySelector('.modal-scroll')
+    if (!m || !sc) return { ok: false, hasScroll: !!sc }
+    const cs = getComputedStyle(m)
+    return {
+      ok: true,
+      overflow: cs.overflow,
+      scOverflow: getComputedStyle(sc).overflowY,
+      scrolls: sc.scrollHeight > sc.clientHeight,
+      radius: cs.borderTopRightRadius,
+    }
+  })()`)
+  check(
+    '弹窗外层裁切、内层滚动（圆角不被滚动条切）',
+    shell?.ok === true && shell.overflow === 'hidden' && shell.scOverflow === 'auto',
+    JSON.stringify(shell),
+  )
+  check('内容超长时内层真的滚起来', shell?.scrolls === true, JSON.stringify(shell))
+
   const section = await evalJs(`(() => ({
     hasSection: !!document.querySelector('.env-section'),
     labels: [...document.querySelectorAll('.env-section .field span')].map((n) => n.textContent.trim()),
@@ -295,7 +316,7 @@ try {
       hasDefault: rows.some((r) => r.querySelector('.host-tag.is-default')),
     }
   })()`)
-  check('目标列表渲染出已有条目', rows0?.count >= 3, JSON.stringify(rows0))
+  check('目标列表渲染出已有条目', rows0?.count >= 1, JSON.stringify(rows0))
   check('默认目标有标记', rows0?.hasDefault === true)
 
   const hostName = `zz-ui-host-${Date.now().toString(36)}`

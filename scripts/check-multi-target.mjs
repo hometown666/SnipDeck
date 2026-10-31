@@ -19,7 +19,7 @@ import { spawn, execSync } from 'node:child_process'
 import { existsSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { profileDir } from './lib/profile.mjs'
-import { primeToken } from './lib/token.mjs'
+import { primeToken, readToken } from './lib/token.mjs'
 
 const CANDIDATES = [
   process.env.CHROME_PATH,
@@ -39,6 +39,30 @@ const [url = 'http://127.0.0.1:7878/', snippetArg] = process.argv.slice(2)
 const SNIPPET = snippetArg ?? process.env.MULTI_SNIPPET ?? '查看实例表'
 const TARGET = process.env.MULTI_TARGET ?? 'win-desktop'
 const port = 9413
+const token = readToken()
+const apiBase = new URL(url).origin
+
+// 灰显路径要有一条 reserved 目标才看得见。真实数据里已经没有占位了
+// （home-win / vps 随 P5.3 砍 SSH 一并清掉），所以这里临时造一条，跑完删掉。
+const RESERVED = 'zz-ui-reserved'
+async function api(method, path, body) {
+  const res = await fetch(apiBase + path, {
+    method,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  })
+  return { status: res.status, body: await res.text() }
+}
+// 上一次异常退出可能留着，先清一次
+await api('DELETE', '/api/hosts/' + RESERVED)
+const madeReserved = await api('POST', '/api/hosts', { name: RESERVED, driver: 'local' })
+if (madeReserved.status !== 201) {
+  console.error(`建临时 reserved 目标失败（${madeReserved.status}）：${madeReserved.body.slice(0, 200)}`)
+  process.exit(1)
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -228,8 +252,8 @@ async function drive(width, height, label) {
     }
   }
 
-  check(`[${label}] reserved 目标灰显（home-win / vps disabled）`,
-    hostButtons.filter((b) => /home-win|vps/.test(b.text) && b.disabled).length === 2,
+  check(`[${label}] reserved 目标灰显（disabled）`,
+    hostButtons.filter((b) => b.text.includes(RESERVED) && b.disabled).length === 1,
     JSON.stringify(hostButtons))
   check(`[${label}] ⊕ 入口预选片段目标（1 个 chip）`,
     chipsInitial.length === 1 && chipsInitial[0]?.includes(TARGET), JSON.stringify(chipsInitial))
@@ -451,6 +475,7 @@ async function openFan(width, height) {
   await send('Emulation.setTouchEmulationEnabled', { enabled: false })
 }
 
+await api('DELETE', '/api/hosts/' + RESERVED)
 ws.close()
 console.log(fail === 0 ? '\n结果: 多目标 UI 通过' : `\n结果: ${fail} 项失败`)
 cleanup(fail === 0 ? 0 : 1)

@@ -59,7 +59,7 @@ SnipDeck 只负责把命令交出去、把结果带回来 —— 细节见 [brid
 ## 第一次跑通（约 5 分钟）
 
 ```bash
-npm run sync:launchers      # 生成 launchers/*.bat（hexo / txttunnel / backtrans 那几条要用）
+npm run sync:launchers      # 生成 launchers/*.bat（hexo / txttunnel / backtrans 与 snipdeck 自己）
 npm run snip -- status      # 应显示 bridge: up
 npm run snip -- list        # 16 条存量片段
 npm run snip -- run check-instence

@@ -984,3 +984,151 @@ data/settings.json → buildApp 的 extraEnv 闭包 → ExecDriver spawn(env) �
   保留它们是为了让 `hosts.yaml` 能表达「以后要接这台」。
 - **没有排序/拖拽**：目标顺序就是 YAML 里的顺序，新增的排最后。默认目标由 `default` 决定，
   与顺序无关（`resolveTarget` 先找 default，再取第一个可用的）。
+
+## 38. 三处收尾：占位目标、弹窗圆角、launcher（2026-10-31）
+
+### 38.1 `home-win` / `vps` 删掉
+
+这两条从 v0.2 起就在 `hosts.yaml` 里当占位：`local` 驱动随 P5.1 撤回，`ssh` 随 P5.3 砍掉，
+**两条都点不动**，在目标列表里只是两行灰字。删掉它们，同时保留能表达「以后要接这台」的能力：
+
+| 保留 | 删掉 |
+|---|---|
+| `HostTarget.driver` 仍接受 `local` / `ssh`（手写 YAML 不会解析失败） | `data/hosts.yaml` 里的两条占位 |
+| 运行时对未实现 driver 抛「P5 预留」 | 新建目标表单里的 `local` / `ssh` 选项 |
+| 已存在的非 exec 目标仍能渲染、能编辑、能删除 | 把 `local`/`ssh` 当默认建议 |
+
+界面上新建只能选 `exec`；老配置里如果还有 `local` / `ssh`，编辑时那个值会以
+「（未实现，仅占位）」留在下拉里，**不会静默改成 exec**——静默改等于替用户做了一个他没同意的决定。
+
+测试跟着改：冒烟 fixture 里留一条 `legacy-reserved`（local）专门验「reserved 目标 → 400」；
+`ui:multi` 原来断言 `home-win` / `vps` 灰显，现在改成**跑之前用 API 建一条临时 `zz-ui-reserved`**，
+跑完删掉。测试不该依赖「生产数据里恰好有两条占位」。
+
+### 38.2 弹窗滚动条把圆角切成直角
+
+**现象**：设置弹窗内容一长就出滚动条，右上角（桌面端还有右下角）的圆角变成直角。
+
+**原因**：`overflow: auto` 挂在带 `border-radius` 的**同一层**上。原生滚动条画在那层的
+padding box 里，不参与圆角裁剪——于是它从顶到底盖住右侧，把圆角"抹平"。
+`::-webkit-scrollbar` 调宽度也没用，那只是让被抹平的边窄一点。
+
+**修法**：滚动挪到内层。
+
+```
+.modal      { overflow: hidden; display: flex; flex-direction: column; }   ← 只负责圆角与裁剪
+.modal-scroll { overflow-y: auto; min-height: 0; padding: … }              ← 真正的滚动容器
+```
+
+`min-height: 0` 是必须的：flex 子项默认 `min-height: auto`，不给它就不会收缩，内层撑不开也就滚不动。
+
+顺带把「遮罩点击关闭 + stopPropagation」抽成 `<Modal>`（5 个弹窗各写过一遍）。
+`MacroPanel` 的 `.macro` 是同样的问题、同样的修法（多了个 `.macro-body`），
+并把 `.macro-list` 的 `overflow` 撤掉——两层都能滚会出现双滚动条。
+
+**sticky 底部按钮不受影响**：它现在相对 `.modal-scroll` 粘，行为与之前一致（编辑器回归 26 项过）。
+
+### 38.3 launcher 生成脚本（本来就有，但有个坑）
+
+`npm run sync:launchers`（`scripts/sync-launchers.mjs`）生成 `%AHK_ROOT%\launchers\*.bat`，
+GBK 编码、`cd /d` 进各自目录。为什么需要这一层写在脚本头部：`shell` 片段里嵌套引号会被 cmd
+在空格处截断，`&&` 后面的命令甚至会泄漏到本地执行——把 `cd` 收进无空格的 launcher 就没这问题。
+
+**坑**：`snipdeck.bat` 原来跑的是 `npm run dev:server`。那条是裸进程——不读 `.env`（HOST / TOKEN 全丢）、
+不写 `data/logs/server.log`、没有单实例守卫。于是「双击 launcher 起的服务」和
+「计划任务起的服务」是两种行为，排查时会怀疑人生。现在改成
+`scripts\start-server.ps1`，与自启完全同一条路径。
+
+### 38.4 验收
+
+| 项 | 结果 |
+|---|---|
+| `npm test` | **139**，全绿（fixture 的 reserved 改成 `legacy-reserved`，断言同步） |
+| `ui:settings` | **30 项**（新增 2 条：外层 `overflow:hidden` + 内层真的滚起来） |
+| `ui:editor` | 26 项通过（sticky 底部按钮没被内层滚动破坏） |
+| `ui:multi` | 通过；临时 `zz-ui-reserved` 建→验灰显→删 |
+| launcher | 重新生成 4 个；`snipdeck.bat` 内容已指向 `start-server.ps1` |
+| 真实数据 | `data/hosts.yaml` 只剩 `win-desktop`，服务重启后 `/api/hosts` 一条 |
+
+### 38.5 已知缺口
+
+- `sync:launchers` 里的 cwd 是**写死的本机路径**（那是它的配置）。换机器要改这个脚本再跑；
+  它不做目录存在性校验（生成时只看字符串）。
+- 弹窗圆角修复依赖内层滚动结构：以后新写弹窗**必须用 `<Modal>`**，别再手写
+  `<div className="modal-mask"><div className="modal">`。这条没有 lint 拦，靠 review。
+- `local` / `ssh` 的代码路径仍在（`ReservedDriverError`）。真要彻底删，得连类型一起动，
+  收益不大——留着它反而让「手写 hosts.yaml 不会炸」这件事成立。
+
+## 38. 三处收尾：占位目标、弹窗圆角、launcher（2026-10-31）
+
+### 38.1 `home-win` / `vps` 删掉
+
+这两条从 v0.2 起就在 `hosts.yaml` 里当占位：`local` 驱动随 P5.1 撤回，`ssh` 随 P5.3 砍掉，
+**两条都点不动**，在目标列表里只是两行灰字。删掉它们，同时保留能表达「以后要接这台」的能力：
+
+| 保留 | 删掉 |
+|---|---|
+| `HostTarget.driver` 仍接受 `local` / `ssh`（手写 YAML 不会解析失败） | `data/hosts.yaml` 里的两条占位 |
+| 运行时对未实现 driver 抛「P5 预留」 | 新建目标表单里的 `local` / `ssh` 选项 |
+| 已存在的非 exec 目标仍能渲染、能编辑、能删除 | 把 `local`/`ssh` 当默认建议 |
+
+界面上新建只能选 `exec`；老配置里如果还有 `local` / `ssh`，编辑时那个值会以
+「（未实现，仅占位）」留在下拉里，**不会静默改成 exec**——静默改等于替用户做了一个他没同意的决定。
+
+测试跟着改：冒烟 fixture 里留一条 `legacy-reserved`（local）专门验「reserved 目标 → 400」；
+`ui:multi` 原来断言 `home-win` / `vps` 灰显，现在改成**跑之前用 API 建一条临时 `zz-ui-reserved`**，
+跑完删掉。测试不该依赖「生产数据里恰好有两条占位」。
+
+### 38.2 弹窗滚动条把圆角切成直角
+
+**现象**：设置弹窗内容一长就出滚动条，右上角（桌面端还有右下角）的圆角变成直角。
+
+**原因**：`overflow: auto` 挂在带 `border-radius` 的**同一层**上。原生滚动条画在那层的
+padding box 里，不参与圆角裁剪——于是它从顶到底盖住右侧，把圆角"抹平"。
+`::-webkit-scrollbar` 调宽度也没用，那只是让被抹平的边窄一点。
+
+**修法**：滚动挪到内层。
+
+```
+.modal      { overflow: hidden; display: flex; flex-direction: column; }   ← 只负责圆角与裁剪
+.modal-scroll { overflow-y: auto; min-height: 0; padding: … }              ← 真正的滚动容器
+```
+
+`min-height: 0` 是必须的：flex 子项默认 `min-height: auto`，不给它就不会收缩，内层撑不开也就滚不动。
+
+顺带把「遮罩点击关闭 + stopPropagation」抽成 `<Modal>`（5 个弹窗各写过一遍）。
+`MacroPanel` 的 `.macro` 是同样的问题、同样的修法（多了个 `.macro-body`），
+并把 `.macro-list` 的 `overflow` 撤掉——两层都能滚会出现双滚动条。
+
+**sticky 底部按钮不受影响**：它现在相对 `.modal-scroll` 粘，行为与之前一致（编辑器回归 26 项过）。
+
+### 38.3 launcher 生成脚本（本来就有，但有个坑）
+
+`npm run sync:launchers`（`scripts/sync-launchers.mjs`）生成 `%AHK_ROOT%\launchers\*.bat`，
+GBK 编码、`cd /d` 进各自目录。为什么需要这一层写在脚本头部：`shell` 片段里嵌套引号会被 cmd
+在空格处截断，`&&` 后面的命令甚至会泄漏到本地执行——把 `cd` 收进无空格的 launcher 就没这问题。
+
+**坑**：`snipdeck.bat` 原来跑的是 `npm run dev:server`。那条是裸进程——不读 `.env`（HOST / TOKEN 全丢）、
+不写 `data/logs/server.log`、没有单实例守卫。于是「双击 launcher 起的服务」和
+「计划任务起的服务」是两种行为，排查时会怀疑人生。现在改成
+`scripts\start-server.ps1`，与自启完全同一条路径。
+
+### 38.4 验收
+
+| 项 | 结果 |
+|---|---|
+| `npm test` | **139**，全绿（fixture 的 reserved 改成 `legacy-reserved`，断言同步） |
+| `ui:settings` | **30 项**（新增 2 条：外层 `overflow:hidden` + 内层真的滚起来） |
+| `ui:editor` | 26 项通过（sticky 底部按钮没被内层滚动破坏） |
+| `ui:multi` | 通过；临时 `zz-ui-reserved` 建→验灰显→删 |
+| launcher | 重新生成 4 个；`snipdeck.bat` 内容已指向 `start-server.ps1` |
+| 真实数据 | `data/hosts.yaml` 只剩 `win-desktop`，服务重启后 `/api/hosts` 一条 |
+
+### 38.5 已知缺口
+
+- `sync:launchers` 里的 cwd 是**写死的本机路径**（那是它的配置）。换机器要改这个脚本再跑；
+  它不做目录存在性校验（生成时只看字符串）。
+- 弹窗圆角修复依赖内层滚动结构：以后新写弹窗**必须用 `<Modal>`**，别再手写
+  `<div className="modal-mask"><div className="modal">`。这条没有 lint 拦，靠 review。
+- `local` / `ssh` 的代码路径仍在（`ReservedDriverError`）。真要彻底删，得连类型一起动，
+  收益不大——留着它反而让「手写 hosts.yaml 不会炸」这件事成立。

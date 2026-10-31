@@ -1,5 +1,6 @@
 import type { HostView } from '../api'
 import { MAX_TARGETS, type Draft } from '../types'
+import { Modal } from './Modal'
 
 /**
  * 执行表单：目标选择器（chips + 可选目标按钮）+ 变量表单 + 命令预览。
@@ -29,8 +30,7 @@ export function RunFormModal({
   onClose: () => void
 }) {
   return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose}>
         <h3>{draft.snippet.title}</h3>
         <p className="modal-sub">
           {draft.snippet.id}
@@ -136,7 +136,6 @@ export function RunFormModal({
             执行
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

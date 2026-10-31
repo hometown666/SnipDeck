@@ -1,5 +1,6 @@
 import type { RunListItem } from '../api'
 import { fmtDur, fmtWhen } from '../lib/run-events'
+import { Modal } from './Modal'
 
 /** 运行历史：每次执行落一份档案，断开页面后仍能回看（P4） */
 export function HistoryModal({
@@ -20,8 +21,7 @@ export function HistoryModal({
   onClose: () => void
 }) {
   return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="modal history-modal" onClick={(e) => e.stopPropagation()}>
+    <Modal className="history-" onClose={onClose}>
         <h3>运行历史</h3>
         <p className="modal-sub">
           每次执行服务端都会落一份档案（<code>data/runs/&lt;runId&gt;.jsonl</code>）；断网、关页面之后也能回看。
@@ -60,7 +60,6 @@ export function HistoryModal({
             刷新
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

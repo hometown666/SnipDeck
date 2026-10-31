@@ -135,15 +135,24 @@
   flex-direction: column;
   width: min(560px, 92vw);
   max-height: min(78vh, 720px);
-  padding: 16px 18px 14px;
   border: 1px solid var(--border);
   border-radius: 16px;
   background: var(--surface);
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.14);
-  /* 详情态没有 .macro-list 那个可滚区域，内容超出时得整体滚——
+  /* 滚动放内层：挂在这里时原生滚动条会把 16px 的圆角切成直角。
+     详情态没有 .macro-list，内容超出时由 .macro-body 整体滚——
      否则手机上底部提示会被屏幕边缘切掉（390 实测踩过）。 */
-  overflow-y: auto;
+  overflow: hidden;
   overscroll-behavior: contain;
+}
+
+.macro-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 18px 14px;
 }
 
 .macro-head {
@@ -192,7 +201,8 @@
 .macro-list {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  /* 滚动交给外层 .macro-body：两层都能滚会出现双滚动条 */
+  overflow: visible;
   padding-right: 2px;
 }
 

@@ -158,7 +158,7 @@
 | 启动 | `powershell -File .\scripts\start-server.ps1`（读 `.env`，日志追加到 `data/logs/server.log`） |
 | 自启 | `powershell -File .\scripts\install-autostart.ps1`（登录时计划任务，**已注册 2026-10-30**，见 §16.1）；`-Uninstall` 卸载 |
 | 配置 | 复制 `.env.example` 为 `.env`（已 gitignore） |
-| 服务启动器 | `npm run sync:launchers` —— 生成 GBK 的 `%AHK_ROOT%\launchers\{hexo,txttunnel,backtrans}.bat`；`shell` 片段依赖它 |
+| 服务启动器 | `npm run sync:launchers` —— 生成 GBK 的 `%AHK_ROOT%\launchers\{hexo,txttunnel,backtrans,snipdeck}.bat`。前三个给 `shell` 片段用（避开嵌套引号）；`snipdeck.bat` 调 `scripts\start-server.ps1`，与计划任务自启**同一条路径**（读 `.env`、写 `data/logs/server.log`、单实例） |
 | Lint | `npm run lint`（eslint 9 flat config，`eslint.config.mjs`）。**只拦错不排格式**——没有 prettier，免得一次把 5000 行重排成没法 review 的 diff |
 | 环境自检 | `npm run doctor` —— **只读**：Node 版本、AutoHotkey v2、`C:\ahk_trigger` 与三个桥文件（连行数一起报，能看出是不是空文件）、launchers、`.env`、token 与 HOST 的组合、服务是否在跑、桥是否 up；另比对**仓库这份 vs 已装那份**（不一致给 `~ 版本` 提示，不判错）。每条失败都带一条修复命令；有 ✗ 时退出码 1 |
 | 装桥 | `npm run install:bridge` —— 把 `bridge/` 的三个文件拷到 `C:\ahk_trigger`（`-Target <目录>` 可换）。**注意「装在哪」不等于「运行的是哪份」**：自启指向别处时，装完还得改自启。目标已存在且内容不同**先备份成 `*.bak.<时间戳>` 再覆盖**（本机那份可能被改过）；内容相同跳过；`-DryRun` 只看，`-Start` 装完启动 listener。**不装 AutoHotkey**，没装只打印 winget 命令 |

@@ -51,11 +51,8 @@ writeFixture(
     '  shell: cmd',
     `  bridge: ${BRIDGE_YAML}`,
     '  timeout: 20',
-    'home-win:',
+    'legacy-reserved:',
     '  driver: local',
-    '  reserved: true',
-    'vps:',
-    '  driver: ssh',
     '  reserved: true',
     '',
   ].join('\n'),
@@ -313,7 +310,7 @@ check(
       t.name === 'win-desktop' && t.driver === 'exec' && t.default,
   ),
 )
-check('home-win / vps 标记 reserved', hs.filter((t: { reserved: boolean }) => t.reserved).length === 2)
+check('fixture 里有一条 reserved 目标', hs.filter((t: { reserved: boolean }) => t.reserved).length === 1)
 
 // 5.0 目标管理（hosts.yaml）
 const hd0 = (await app.inject({ method: 'GET', url: '/api/hosts/detail', headers: auth })).json()
@@ -558,7 +555,7 @@ const reservedTarget = await app.inject({
   method: 'POST',
   url: '/api/run',
   headers: auth,
-  payload: { id: 'kill-demo', confirm: true, target: 'vps' },
+  payload: { id: 'kill-demo', confirm: true, target: 'legacy-reserved' },
 })
 check('reserved 目标 → 400', reservedTarget.statusCode === 400, String(reservedTarget.statusCode))
 
@@ -566,7 +563,7 @@ check('reserved 目标 → 400', reservedTarget.statusCode === 400, String(reser
 const targetsBad: [string, unknown][] = [
   ['空数组', []],
   ['未知目标', ['nope']],
-  ['含 reserved 目标（整条拒绝）', ['win-desktop', 'vps']],
+  ['含 reserved 目标（整条拒绝）', ['win-desktop', 'legacy-reserved']],
   ['非数组', 'win-desktop'],
   ['空字符串项', ['win-desktop', '  ']],
 ]

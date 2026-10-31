@@ -36,8 +36,11 @@ const LAUNCHERS = {
   },
   'snipdeck.bat': {
     cwd: 'D:\\试炼之地\\remote text control',
-    run: 'call npm run dev:server',
-    note: 'SnipDeck 服务（前台，日志直接打在窗口里；默认 127.0.0.1:7878）',
+    // 走 scripts/start-server.ps1 而不是 npm run dev:server：那条会读 .env（HOST / TOKEN）、
+    // 把日志写进 data/logs/server.log，还有「同一时间只允许一个实例」的守卫。
+    // dev:server 是裸进程——双击出来的服务和计划任务起的服务会是两种行为。
+    run: 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\start-server.ps1',
+    note: 'SnipDeck 服务（读 .env，日志 data/logs/server.log，单实例）',
   },
 }
 

@@ -156,9 +156,14 @@ export function HostsSection({ onChanged }: { onChanged?: () => void }) {
                 value={editing.draft.driver}
                 onChange={(e) => patch({ driver: e.target.value as Draft['driver'] })}
               >
+                {/* 只给 exec 新建：local / ssh 在 P5.3 砍掉 SSH 之后没有任何实现，
+                    放进下拉里只会让人选中一个跑不了的东西。老配置里已有的值仍然保留。 */}
                 <option value="exec">exec（走桥）</option>
-                <option value="local">local（占位）</option>
-                <option value="ssh">ssh（占位）</option>
+                {editing.draft.driver !== 'exec' && (
+                  <option value={editing.draft.driver}>
+                    {editing.draft.driver}（未实现，仅占位）
+                  </option>
+                )}
               </select>
             </label>
           </div>

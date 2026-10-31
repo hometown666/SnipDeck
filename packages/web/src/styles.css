@@ -288,9 +288,20 @@ body {
   width: 100%;
   max-width: 520px;
   border-radius: 18px 18px 0 0;
-  padding: 20px 18px 24px;
   max-height: 86vh;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  /* 滚动交给 .modal-scroll。直接挂在这里时，原生滚动条从顶到底占满右边缘，
+     会把右上角（桌面端还有右下角）的圆角切成直角——滚动条画在圆角裁剪之外。 */
+  overflow: hidden;
+}
+
+.modal-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 18px 24px;
+  /* flex 子项默认 min-height:auto，不设这个内层撑不开、也就滚不动 */
+  min-height: 0;
 }
 
 .modal h3 {
@@ -871,6 +882,10 @@ body {
 
   .modal {
     border-radius: 18px 18px 0 0;
+  }
+
+  /* 内边距挪到滚动层：外层只负责圆角与裁剪 */
+  .modal-scroll {
     padding-bottom: max(24px, env(safe-area-inset-bottom));
   }
 
@@ -1021,6 +1036,9 @@ body {
 
   .modal {
     border-radius: 16px;
+  }
+
+  .modal-scroll {
     padding: 22px 22px 20px;
   }
 

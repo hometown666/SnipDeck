@@ -222,3 +222,9 @@
   - 界面用**内联展开**而不是第二层弹窗（手机上双遮罩很难用）；删除连点两次，与片段一致。
   - `clean:tmp` 现在也按天清 `data/tmp/*.png`（`--all` 不碰截图）。
   - 冒烟 116 → **139**；`ui:settings` 14 → **28 项**（桥目录 + 档案 + 目标），1366 与真 390 双过；主包 gzip 61.81 → **63.54KB**。
+- **v3.6**（2026-10-31，占位目标清理 · 弹窗圆角 · launcher 修正）：
+  - **删掉 `hosts.yaml` 里的 `home-win` / `vps`**：`local` 随 P5.1 撤回、`ssh` 随 P5.3 砍掉，两条都点不动。类型上仍接受这两个 driver（手写 YAML 不会炸、运行时抛「P5 预留」），但**新建目标的表单只给 `exec`**；老配置里的非 exec 值会以「（未实现，仅占位）」保留，不静默改成 exec。
+  - **弹窗滚动条不再切圆角**：`overflow:auto` 与 `border-radius` 在同一层时，原生滚动条画在圆角裁剪之外，把右上/右下角抹成直角。改成外层 `overflow:hidden` + 内层 `.modal-scroll` 滚动（`min-height:0`），并把遮罩点击抽成 `<Modal>`。`MacroPanel` 的 `.macro` 同修，`.macro-list` 撤掉自己的滚动（否则双滚动条）。
+  - **`snipdeck.bat` 改走 `scripts/start-server.ps1`**：原来跑 `npm run dev:server`，不读 `.env`、不写日志、没有单实例守卫——双击起的服务和计划任务起的服务是两种行为。`npm run sync:launchers` 已重新生成 4 个 launcher。
+  - 测试同步：冒烟 fixture 的 reserved 改成 `legacy-reserved`（专测「未激活目标 → 400」）；`ui:multi` 不再依赖生产数据里的占位，改为跑前用 API 建临时 `zz-ui-reserved`、跑完删。
+  - 冒烟仍 **139**；`ui:settings` 28 → **30**；`ui:editor` 26 项通过。

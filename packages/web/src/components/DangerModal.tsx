@@ -1,4 +1,5 @@
 import type { SnippetView } from '../api'
+import { Modal } from './Modal'
 
 /** danger 片段的二次确认。点「仍然执行」才带上 confirmed=true 再走一遍 openSnippet */
 export function DangerModal({
@@ -11,8 +12,7 @@ export function DangerModal({
   onConfirm: (s: SnippetView) => void
 }) {
   return (
-    <div className="modal-mask" onClick={onCancel}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onCancel}>
         <h3 className="danger-title">危险动作确认</h3>
         <p className="modal-sub">
           {snippet.title}（{snippet.id}）
@@ -26,7 +26,6 @@ export function DangerModal({
             仍然执行
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

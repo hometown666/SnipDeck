@@ -8,6 +8,7 @@ import {
   type SnippetStep,
   type SnippetVarSpec,
 } from '../api'
+import { Modal } from './Modal'
 
 /**
  * 片段编辑器（结构化表单）。
@@ -446,8 +447,7 @@ export function SnippetEditor({
   }
 
   return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="modal editor" onClick={(e) => e.stopPropagation()}>
+    <Modal className="editor" onClose={onClose}>
         <h3>{editing ? '编辑片段' : '新建片段'}</h3>
         <div className="editor-tabs">
           <button
@@ -868,7 +868,6 @@ export function SnippetEditor({
             {saving ? '保存中…' : '保存'}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

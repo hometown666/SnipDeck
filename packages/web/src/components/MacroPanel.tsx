@@ -91,6 +91,7 @@ export function MacroPanel({
   return (
     <div className="modal-mask" onClick={onClose}>
       <div className="macro" onClick={(e) => e.stopPropagation()}>
+        <div className="macro-body">
         {active ? (
           <>
             <div className="macro-head">
@@ -220,6 +221,7 @@ export function MacroPanel({
             </div>
           </>
         )}
+        </div>
       </div>
     </div>
   )

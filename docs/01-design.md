@@ -30,7 +30,7 @@
 **做**
 
 1. 片段库：YAML 文件为唯一真相（目录即分组），支持变量（含 `choices` 下拉）、多步动作、任意 `meta` 字段。
-2. 一类执行目标：**win-desktop（exec 驱动）**，统一到驱动接口下；`home-win` / `vps` 在 hosts.yaml 里继续占位但仍是 `reserved`（P5 的终端走自己的连接列表，不读 `target`）。
+2. 一类执行目标：**win-desktop（exec 驱动）**，统一到驱动接口下。`home-win` / `vps` 两条占位已于 2026-10-31 删除（P5.1 撤回 local、P5.3 砍掉 ssh，留着只是噪音）；终端走自己的连接列表，从不读 `target`。
 3. 跨设备：同一份库、同一套主机配置，手机和笔记本看到的是同一个东西。
 4. CLI：`snip list|run|search|hosts|status|reindex`，任意 SSH 终端（包括 Termius）里都能用。
 5. Web/PWA：片段面板 + 变量表单 + 一键运行 + 输出查看 + 桥队列可视化。
@@ -92,7 +92,7 @@ interface Driver {
 `RunRequest` 里带：片段、目标、渲染后的变量、步骤列表。  
 `RunEvent`：`{ type: 'start' | 'stdout' | 'stderr' | 'step' | 'exit' | 'error', ... }`。
 
-**要点**：UI 只认 `RunEvent`，不认驱动。本期只实现 exec，`kind` 另外两个值留着是因为 `hosts.yaml` 里 `home-win` / `vps` 还占着位。
+**要点**：UI 只认 `RunEvent`，不认驱动。本期只实现 exec；`kind` 里 `local` / `ssh` 两个值留在类型上，是为了让手写的 hosts.yaml 仍能解析（运行时抛「P5 预留」），但新建目标的表单里已经不提供。
 
 > **没有 `openSession()`。** 2026-10-30 删掉了这个预留方法：它暗示终端会话可以长在驱动上，而实际模型不是——驱动一次性返回、有退出码；会话长驻、双向、没有退出码。P5 的终端在 `packages/server` 的 `SessionManager` 里，见 [06-terminal.md](06-terminal.md) §24。
 
@@ -138,7 +138,7 @@ ahk.bat 就是桥协议的客户端，exec 驱动通过它的子命令获得全�
 - **驱动**（`packages/drivers`）：只服务「片段执行」——一次性、整段返回、有退出码。本期仍然只有 `exec`。
 - **会话**（`packages/server` 的 `SessionManager`）：PTY——长驻、流式、双向。它**不实现 `Driver` 接口**，也不参与 `RunRequest` / `RunEvent`。硬塞进去会让两个模型互相污染：一个要退出码，一个没有退出码。（SSH 会话 2026-10-30 决定不做，见 06-terminal.md §23.2。）
 - **唯一共享**的是输出解码（BOM / UTF-8 合法性 / GBK 回退）。真需要时再抽，不预支。
-- `hosts.yaml` 里 `home-win` / `vps` 继续占位，但仍是 `reserved`——**终端不读 `target`，它有自己的一套连接列表**。
+- **终端不读 `target`，它有自己的一套连接列表**；`hosts.yaml` 现在只剩 `win-desktop` 一条真正能跑的目标。
 
 ### 4.5 能力矩阵（这决定了片段怎么写）
 
@@ -171,14 +171,9 @@ win-desktop:              # 本期唯一可用目标
   bridge: C:\ahk_trigger  # ahk.bat 所在目录
   timeout: 20
 
-home-win:                 # 占位：本机 shell（P5 终端有独立连接列表，不走 target）
-  driver: local
-  reserved: true
-
-vps:                      # 占位：远端 SSH（P5 终端用，不作为片段 target）
-  driver: ssh
-  host: 100.99.202.54
-  reserved: true
+# 2026-10-31：home-win / vps 两条占位已删除。
+#   local 驱动随 P5.1 撤回，ssh 随 P5.3 砍掉，两条都点不动、只是列表里的噪音。
+#   要再加「以后打算接的机器」，在网页 ⚙ → 目标 里建一条 local/ssh 即可（会标成 reserved）。
 ```
 
 ### 5.2 片段（data/snippets/\*\*/\*.yaml）
