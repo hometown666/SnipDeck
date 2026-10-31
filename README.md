@@ -32,15 +32,31 @@
 > 多目标目前只有 `win-desktop` 一个可选项（`home-win` / `vps` 灰显）。
 > 「一条片段投多台机器」**不做**（2026-10-30 决定）；跨机器干活走 P5 的网页终端，开多个会话并排。数据结构和 UI 按 `targets[]` 铺好了，同目标多开照样能用。
 
-## 第一次跑通（约 5 分钟）
+## 环境准备（只需一次）
 
-前提：Node 22+，且桌面已运行 `AutoHotKey\listener.ahk`（提权）。**真正执行命令的是它**，SnipDeck 只负责把命令交给它、把结果带回来。
+三样缺一不可：
+
+| 需要 | 怎么来 |
+|---|---|
+| Node 22+ | [nodejs.org](https://nodejs.org) |
+| AutoHotkey **v2** | `winget install AutoHotkey.AutoHotkey` |
+| 桥脚本装到 `C://ahk_trigger` | `npm run install:bridge` |
 
 ```bash
 npm install
+npm run install:bridge      # 拷三个桥文件；已存在的会先 .bak，不静默覆盖
+npm run doctor              # 自检：Node / AHK / 桥文件 / 服务 / token
+```
+
+`doctor` 每条失败都带修复命令。**真正执行命令的是 listener**（常驻在桌面会话里），
+SnipDeck 只负责把命令交出去、把结果带回来 —— 细节见 [bridge/README.md](./bridge/README.md)。
+
+## 第一次跑通（约 5 分钟）
+
+```bash
 npm run sync:launchers      # 生成 launchers/*.bat（hexo / txttunnel / backtrans 那几条要用）
-npm run snip -- status      # 探活：应显示 bridge: up；down 就先去查 listener.ahk
-npm run snip -- list        # 16 条存量片段，按分组列出
+npm run snip -- status      # 应显示 bridge: up
+npm run snip -- list        # 16 条存量片段
 npm run snip -- run check-instence
 ```
 
@@ -209,6 +225,7 @@ data/
 | `packages/server`  | Fastify：REST + SSE + 静态托管                             |
 | `packages/cli`     | `snip list / search / cat / edit / run / hosts / status / reindex / runs / import-history` |
 | `packages/web`     | Vite + React + PWA                                    |
+| `bridge/`          | 桌面执行端：`listener.ahk` / `ahk.bat` / `ahk_cmd.ps1`，装到 `C://ahk_trigger`（见 [bridge/README.md](./bridge/README.md)） |
 
 ## 测试
 

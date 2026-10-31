@@ -194,3 +194,12 @@
   - **跑完看标题**：`document.title` 显示 `⏳ 1/2 · SnipDeck` / `✓ 2/2` / `✗ 1/2`。**没用 `Notification`**——它和 service worker 一样只在安全上下文可用，而手机访问的是 http；这件事实际被 HTTPS 卡着（§12-1）。
   - **`clean:tmp` 补第三类**：`pty-probe/node_modules`（P5 前置验证的 node-pty，63MB）。实清 **145MB**，`data/tmp` 174MB → 24MB。探针脚本与 `RESULT.md` 保留。
   - 文档：§12-1 重写（鉴权已改完，剩下的是 PWA 决策）、§12-5 里 SSH 相关待定划掉、新增「定时执行」待定项与三条前置语义、§34 记本轮、PLAN 待办表补 CI 缺口。
+- **v3.3**（2026-10-31，桥文件入库 · 环境自检）：
+  - **`bridge/` 目录**：桌面执行端进版本库——`listener.ahk` / `ahk.bat` / `ahk_cmd.ps1` + `README.md`。之前这三份只存在于本机，README 却写着「桌面已运行 listener.ahk」：**文档承诺了一个仓库里不存在的东西**。
+  - **半路发现第一次裁的是过期副本**：`C:\ahk_trigger\listener.ahk` 1855 行（9 月），实际在跑的是 `D:\…\AutoHotKey\listener.ahk` 2119 行（10-18），两份 md5 不同。**`C:\ahk_trigger` 是触发目录，不是「脚本的家」**；判哪份在跑只能看进程命令行。已按活的重裁。
+  - **裁掉 `cursor:*` 一整套**：15 个命令、11 个函数、`screenshot:cursor`、`WatchExes` 里的 `Cursor.exe`，**2119 → 1636 行**。那是特定工作流的自动化，不是这个工具的能力。
+  - **`ahk_cmd.ps1` 脱敏**：`PROG_DIR` 默认取**桌面**（人人都有、平铺），`AHK_DIR` 无默认、缺了明确报错。修掉 `Test-Path -LiteralPath ''` 在 `Stop` 模式下抛异常导致整脚本失败的问题。
+  - **`npm run doctor`**：只读自检 12 项（Node / AHK v2 / 桥目录 / 三个桥文件连行数 / launchers / `.env` / token 与 HOST 组合 / 服务 / 桥），每条失败带修复命令，有 ✗ 时退出码 1。另比对「仓库这份 vs 已装那份」，不一致给 `~ 版本` 提示（不判错——本机改过是正常情况，但长期不一致要知道自己在跑哪版）。
+  - **`npm run install:bridge`**：装到 `C:\ahk_trigger`（`-Target` 可换），内容不同先 `*.bak.<时间戳>`，相同跳过，幂等；`-DryRun` / `-Start`；**不装 AutoHotkey**。
+  - **真替换验证**（用户同意停他自己的 listener）：停 watchdog + elevated → 启动仓库版接管 `C:\ahk_trigger` → `snip status` = bridge up、`run check-instence` **53ms**、`run check-status` **739ms** → 恢复计划任务，`status.txt` 回到 `admin=1`。
+  - 修 `Write-Host` 在 PS 5.1 下中文乱码（`[Console]::OutputEncoding`）；`doctor` 的中文标签按显示宽度对齐。

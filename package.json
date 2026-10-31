@@ -30,6 +30,8 @@
     "test:import": "npm run test:import --workspace @snipdeck/core",
     "ui:history": "node scripts/check-history.mjs",
     "ui:editor": "node scripts/ui-editor.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "install:bridge": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-bridge.ps1",
     "test:session": "npm run test:session --workspace @snipdeck/server",
     "test:session-reap": "npm run test:session-reap --workspace @snipdeck/server"
   },

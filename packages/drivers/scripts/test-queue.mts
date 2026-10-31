@@ -36,6 +36,11 @@ async function once(): Promise<Result> {
   return { ok, waited, ms: Date.now() - t }
 }
 
+// 先空跑一次丢掉：第一次调用桥要走「起 cmd → 起 PS → 写文件」的冷路径，
+// 比稳态慢 400~600ms。拿它当基准会让「严格串行」的比值掉到 1.7 以下
+// （实测：冷 2574ms vs 稳态 2085ms，串行两条 4167ms → 1.62，误报成没串行）
+await once()
+
 const single = await once()
 const t0 = Date.now()
 const [a, b] = await Promise.all([once(), once()])

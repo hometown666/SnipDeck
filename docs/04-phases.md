@@ -568,3 +568,97 @@ npm run ui:shot -- http://127.0.0.1:7878/ 390  844  data/tmp/ui-mobile-regress.p
 **一条被卡住的判断**：本来想用 `Notification` API 做真通知，发现它和 service worker 一样**只在安全上下文可用**——手机现在访问的是 `http://100.99.202.54:7878`，那条路走不通。所以「跑完通知」这件事实际被 HTTPS 卡着，标题变化只是退而求其次。这让 `02-roadmap.md` §12-1 那条决策的优先级更高了：**它不只是「要不要省 token」，还决定 PWA 与通知能不能真生效**。
 
 **验收**：`snip cat open-shell` 打出完整原文（含 `>` 折叠块）；`npm run ui:shot -- <url> 1366 900 out.png "check-status"` 跑完后 `document.title` = `✓ 1/1 · SnipDeck`；`npm run clean:tmp -- --days 0` 释放 145.1MB，`data/tmp` 174MB → 24MB。
+
+## 35. 桥文件入库与环境自检（2026-10-31）
+
+**问题**：README 从 P0 起就写着「桌面已运行 `AutoHotKey\listener.ahk`」，而仓库里**一个 `.ahk` 都没有**。
+执行端的三份文件只存在于本机：没有版本历史、没有备份，换台机器直接跑不起来。
+这不是「缺个文档」，是**文档承诺了一个不存在的前提**。
+
+### 35.1 半路发现：第一次裁的是过期副本
+
+第一版裁剪以 `C:\ahk_trigger\listener.ahk` 为源，裁出 1509 行。准备端到端测试时查进程命令行才发现：
+
+| 位置 | 行数 | 日期 | 是谁 |
+|---|---|---|---|
+| `C:\ahk_trigger\listener.ahk` | 1855 | 9 月 | **过期副本** |
+| `D:\试炼之地\Temp\control test\AutoHotKey\listener.ahk` | 2119 | 10-18 | **正在跑的那份**（计划任务 `AHK-listener-elevated`） |
+
+两份 md5 不同，活的那份多了 `LogLine` / `ReadClickCoords` / `ClickCursorChatTab` / `WaitHwndByTitle` 等 9 个函数。
+
+**教训**：`C:\ahk_trigger` 是**触发目录**（`command.txt` / `last_result.txt` / `status.txt` 住在那），
+不是「脚本的家」。目录里躺着的那份 `.ahk` 可能早就不是运行中的那份了 ——
+**判「哪份在跑」只能看进程命令行**（`Get-CimInstance Win32_Process`），不能看哪个目录里有文件。
+按过期源裁出来的通用版会少掉别人机器上正需要的新功能。
+
+已按活的 2119 行重裁：**1636 行**（-483）。
+
+### 35.2 做了什么
+
+| 块 | 具体 |
+|---|---|
+| `bridge/` | `listener.ahk` / `ahk.bat` / `ahk_cmd.ps1` 三份进版本库 + `bridge/README.md` |
+| 裁 listener | 删掉 `cursor:*` 一整套：15 个命令（`focus` / `agent` / `agent-toggle` / `new` / `paste` / `paste:submit` / `send` / `send:new` / `history` / `switch` / `close-chat` / `converge-tabs` / `fork` / `fork:palette` / `stop`）、`screenshot:cursor`、11 个 `Cursor*`/`ClickCursor*` 函数。`WatchExes` 去掉 `Cursor.exe` |
+| 脱敏 | `ahk_cmd.ps1` 的两条个人路径清掉：`PROG_DIR` 默认**桌面**（人人都有、且是平铺的），`AHK_DIR` **无默认**、缺了就报错 |
+| `npm run doctor` | 只读自检 12 项，每条失败带修复命令；另比对「仓库这份 vs 已装那份」 |
+| `npm run install:bridge` | 装到 `C:\ahk_trigger`（`-Target` 可换），内容不同先 `.bak.<时间戳>`，幂等 |
+
+### 35.3 怎么验的（两轮，都真跑）
+
+**第一轮：隔离目录**。复制到 `data/tmp/listener-probe2/`，把 `TriggerDir` 指过去，
+**副本必须改名**（见下面的坑），用 `AutoHotkey64.exe` 起：
+
+| 命令 | 实测 |
+|---|---|
+| （启动） | `OK\|…\|boot\|listener started\|seq=1` |
+| `status` | `OK\|…\|status\|refreshed\|seq=3`；`status.txt` 里 `ts/listener=ok/admin=0/last/foreground` 齐全 |
+| `runlog:p3\|echo hello3` | `spawned pid=…`，`jobs/p3.log` = `hello3`，`jobs/p3.exit` = **0** |
+| `kill:nonexistent#1` | `ERR\|…\|slot not found or process dead`（报错，不是崩） |
+
+**第二轮：真替换**（用户明确同意停他自己的 listener）。这一轮验的是「SnipDeck 能不能用这份通用版跑通」：
+
+1. `Stop-ScheduledTask AHK-listener-watchdog` / `AHK-listener-elevated`（顺序不能反，watchdog 会把它拉起来）；
+2. 启动 `bridge/listener.ahk`（触发目录仍是 `C:\ahk_trigger`，非提权）；
+3. 跑三条：
+
+| 命令 | 结果 |
+|---|---|
+| `npm run snip -- status` | `bridge: up` |
+| `npm run snip -- run check-instence` | 实例表 4 条（airmouse / shell / wechat / workbuddy），`exit=0` **53ms** |
+| `npm run snip -- run check-status` | `Weixin=running…instances=4`，`exit=0` **739ms** |
+
+4. 杀测试实例、重启 `AHK-listener-elevated` + `AHK-listener-broker` + `AHK-listener-watchdog`；
+5. 复核：`status.txt` = `listener=ok / **admin=1**`，`bridge: up`。
+
+**收尾时踩了一下**：杀测试实例的过滤条件用了反斜杠，而启动时传的是正斜杠路径，
+第一次没杀掉 —— 于是测试实例和你恢复的正式 listener 同时抢 `command.txt`。
+**同一时刻只能有一个 listener 指同一个触发目录**，这是硬约束，不是建议。
+
+### 35.4 踩到的两个坑
+
+1. **`#SingleInstance Force` 按文件名认实例。** 测试副本如果也叫 `listener.ahk`，
+   启动它会把**正在跑的那份顶掉**（不是并存）。测副本必须改名（本仓库用 `listener-probe.ahk`）。
+2. **`Test-Path -LiteralPath ''` 不是返回 `false`，是抛参数绑定异常。**
+   `AHK_DIR` 默认空串，`Resolve-Dir` 里直接丢给 `Test-Path`，在 `$ErrorActionPreference='Stop'` 下
+   整个脚本当场失败（`lnk` 明明跟 AHK_DIR 无关）。加 `if ($DefaultPath -and ...)` 短路。
+
+### 35.5 三条判断
+
+1. **`broker.ahk` 不在本仓库，但这台机器上真的在用。** 第一版我写「`C:\ahk_trigger` 里没有 broker，
+   说明 listener 是普通权限跑的」——**错的**，那是看了过期目录得出的结论。实际：listener 提权（`admin=1`），
+   `broker.ahk` 在 `D:\…\AutoHotKey\`，计划任务 `AHK-listener-broker` 常驻。
+   所以「提权 listener + 普通子进程」这条路径是**活跃**的：用仓库这份替换掉提权 listener 之后，
+   普通命令会继承管理员权限。这条写进 `bridge/README.md` 的边界里，不藏。
+2. **`ahk.bat` 的中文注释在 CMD 里注定乱码**。它是 UTF-8，CMD 按 ANSI 读 `.bat`；
+   但中文只在 `rem` 行、代码全 ASCII，乱码不影响执行。改成 GBK 会让仓库里读成乱码，翻译成英文丢原意 —— **不改**。
+3. **`PROG_DIR` 默认桌面**。不默认开始菜单 `Programs`：那里的 `.lnk` 散在子目录，单层拼接基本找不到；
+   也不维护索引 —— `ahk_cmd.ps1` 每次调用都是新进程，现查目录比维护一张会失效的表便宜。
+
+### 35.6 已知缺口
+
+- `TriggerDir` 仍写死 `C:\ahk_trigger`（`listener.ahk` 与 `ahk.bat` 各一处），换目录要同时改两处。
+- `doctor` 不进 `npm test` 也不进 CI：它检查「本机装没装 AHK、桥在不在跑」，CI 里必然失败。
+- **`install:bridge` 装的路径不一定是「运行时用的那份」**。这台机器上自启指向 `D:\…\AutoHotKey\`，
+  装到 `C:\ahk_trigger` 并不会改变实际运行的是谁。脚本只能装文件，改自启指向得人来。
+- 仓库版 listener 与 broker 的配合**没有验证过**：broker 是用户自己那份的配套，协议靠注册表键名约定。
+  真要在提权场景下用仓库版，broker 得一起搬。
