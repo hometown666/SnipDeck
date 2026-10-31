@@ -3,9 +3,18 @@
 自托管的「片段库 + 跨设备执行」工作台：手机上点一下，家里的 Windows 就执行一条命令，输出实时回来看。  
 片段就是 YAML 文件——能 `git diff`、能手改、能整包拷走，不锁在任何云里。
 
+> **30 秒版**
+>
+> ```bash
+> npm install && npm run build:web
+> npm run dev:server          # → http://127.0.0.1:7878
+> ```
+>
+> 打开网页，点卡片就是执行，输出在右侧面板里流出来。手机上把 `SNIPDECK_HOST` 换成 Tailscale IP、`SNIP_TOKEN` 设一个随机串，打开页面后点右上角 `⚙` 填同一个 token。
+
 ## 现在能做什么
 
-- **片段面板**：按目录分组、标签、搜索；手机加到主屏即 PWA
+- **片段面板**：按目录分组、标签、搜索；手机可加到主屏（http 下是快捷方式，见「手机 / PWA」）
 - **16 条存量片段**：Termius 的 Command 包已全量迁移（启动程序 / 实例控制 / 服务 / 日志）
 - **变量表单**：`{{port}}` 占位，支持默认值、下拉选项、必填校验
 - **一键执行**：实时输出（SSE 流），结束给退出码与耗时
@@ -23,54 +32,31 @@
 > 多目标目前只有 `win-desktop` 一个可选项（`home-win` / `vps` 灰显）。
 > 「一条片段投多台机器」**不做**（2026-10-30 决定）；跨机器干活走 P5 的网页终端，开多个会话并排。数据结构和 UI 按 `targets[]` 铺好了，同目标多开照样能用。
 
-## 快速开始
+## 第一次跑通（约 5 分钟）
 
-需要 Node 22+，且桌面已运行 `AutoHotKey\listener.ahk`（提权，负责真正执行）。
+前提：Node 22+，且桌面已运行 `AutoHotKey\listener.ahk`（提权）。**真正执行命令的是它**，SnipDeck 只负责把命令交给它、把结果带回来。
 
 ```bash
 npm install
-npm run sync:launchers            # 生成服务启动器（跑 hexo/txttunnel/backtrans 片段前需要）
-
-npm run snip -- list              # 看有哪些片段（已迁移 Termius 的 16 条）
-npm run snip -- status            # 探活：bridge up / down
+npm run sync:launchers      # 生成 launchers/*.bat（hexo / txttunnel / backtrans 那几条要用）
+npm run snip -- status      # 探活：应显示 bridge: up；down 就先去查 listener.ahk
+npm run snip -- list        # 16 条存量片段，按分组列出
 npm run snip -- run check-instence
-
-npm run snip -- import-history    # 历史命令 → 片段（默认只看计划，加 --write 才落盘）
-npm run snip -- import-history --limit 30 --write
-npm run snip -- runs              # 本机最近的运行档案（带 runId 可看详情）
-
-npm run dev:server                # http://127.0.0.1:7878
-npm run dev:web                   # http://127.0.0.1:5173（/api 代理到 7878）
-npm run build:web                 # 构建后由 server 直接托管
 ```
 
-手机访问：服务端监听 Tailscale 地址时**必须**设 token，否则会拒绝启动（见「安全」）。
+最后一条能打出实例表，说明「片段 → 桥 → 桌面」这条链是通的。
+
+## 日常用（网页 / 手机）
 
 ```bash
+npm run build:web                                              # 前端产物，由 server 直接托管
 SNIPDECK_HOST=100.x.x.x SNIP_TOKEN=<32位随机串> npm run dev:server
 ```
 
-## 常驻运行
-
-```powershell
-# 一次性：注册「登录时启动」计划任务（用户会话，才能驱动桌面 GUI）
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart.ps1 -Uninstall
-
-# 手动起（等价于计划任务干的事）
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-server.ps1
-```
-
-配置放 `.env`（复制 `.env.example`，已 gitignore）：
-
-| 变量                                    | 默认                           | 说明                                |
-| ------------------------------------- | ---------------------------- | --------------------------------- |
-| `SNIPDECK_HOST`                       | `127.0.0.1`                  | 改 Tailscale IP 手机才能访问，此时必须配 token |
-| `SNIPDECK_PORT`                       | `7878`                       | 避开 TxtTunnel 的 8787               |
-| `SNIP_TOKEN`                          | 空                            | 非 loopback 访问 `/api/*` 的 Bearer token（静态页免）       |
-| `SNIPDECK_DATA` / `SNIPDECK_WEB_DIST` | `data` / `packages/web/dist` | 一般不用改                             |
-
-日志：`data/logs/server.log`（同一时间只允许一个实例，第二条会报「文件被占用」）。
+- **本机**：`http://127.0.0.1:7878`
+- **手机**：`http://100.x.x.x:7878`，首次要粘一次 token（三步走见「手机 / PWA」）
+- **常驻**：见「常驻运行」，注册成登录自启的计划任务
+- `SNIPDECK_HOST` 不是 loopback 时**必须**设 `SNIP_TOKEN`，否则服务拒绝启动
 
 ## 桌面端
 
@@ -81,8 +67,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-server.ps1
 | `/` | 聚焦搜索 |
 | `↑` `↓` | 在搜索结果里移动，卡片描边高亮 |
 | `Enter` | 执行选中的片段 |
+| `T` | 对选中片段打开目标选择器（同目标多开） |
+| `E` | 编辑选中的片段 |
+| `N` | 新建片段 |
+| `H` | 运行历史 |
 | `Ctrl/⌘ + Enter` | 变量表单里直接执行 |
-| `Esc` | 逐层关闭：设置 → 表单/确认 → 运行面板 |
+| `Esc` | 逐层关闭：编辑器 → 设置 → 表单/确认 → 运行面板 |
 
 > 输出按语义上色：命令回显、步骤结果（✓ 绿 / ✗ 红）、队列等待（琥珀）、错误（红底）。
 > 桥用 `ERR|` 前缀报错但退出码是 0 时，这里也会判成失败——不会把「slot not found」显示成「完成」。
@@ -98,7 +88,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-server.ps1
 1. 服务端监听 Tailscale 地址并设 token；
 2. 手机浏览器打开 `http://100.x.x.x:7878`——**首屏和静态资源免 token**，页面能正常打开；
 3. 打开后顶部会弹「这台设备还没有 token」横幅：点右上角 ⚙ 粘贴一次，存在这台设备的 localStorage。**token 只护 `/api/*`**，所以页面本身不设防，防的是数据与执行；
-4. 「添加到主屏幕」即可当应用用。
+4. 「添加到主屏幕」。**在 http 下这是快捷方式，不是完整 PWA**（原因见下一条注）。
 
 > **关于离线**：service worker 只在安全上下文注册。经 `http://100.x` 访问时浏览器会跳过，  
 > 此时是「快捷方式」而不是完整 PWA；要离线缓存与安装提示，需要 `tailscale serve` 上 HTTPS。
@@ -145,6 +135,49 @@ steps:
 - **`shell shell#N` 的负载必须是单个引号参数**：不带引号时只有第一个词送得到（`chars=7` 那种）。带空格的命令走 launcher，别内联。
 - **路径带空格就别内联 `cd`**：`shell shell#1 "cd /d D:\a b && …"` 会被 cmd 在空格处截断，`&&` 后面的命令甚至会泄漏到本地执行。用 `npm run sync:launchers` 生成的 `C:\ahk_trigger\launchers\*.bat`。
 
+## CLI 还有什么
+
+```bash
+npm run snip -- cat open-shell            # 看原文（注释、折叠块都在）
+npm run snip -- edit open-shell           # 用 $EDITOR 打开；不设就 notepad
+npm run snip -- runs                      # 最近 20 份运行档案，带 runId 看详情
+npm run snip -- import-history            # shell 历史 → 片段（默认只 dry-run，加 --write 才落盘）
+npm run snip -- import-history --limit 30 --write
+```
+
+> `npm run snip` 只转发 CLI 子命令。`dev:server` / `build:web` 这些是根级脚本，直接 `npm run <名字>`，别挂在 `snip` 后面——那样只会打印 usage 然后 exit 0，看着像跑成功。
+
+## 常驻运行
+
+```powershell
+# 一次性：注册「登录时启动」计划任务（用户会话，才能驱动桌面 GUI）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-autostart.ps1 -Uninstall
+
+# 手动起（等价于计划任务干的事）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-server.ps1
+```
+
+配置放 `.env`（复制 `.env.example`，已 gitignore）：
+
+| 变量                                    | 默认                           | 说明                                |
+| ------------------------------------- | ---------------------------- | --------------------------------- |
+| `SNIPDECK_HOST`                       | `127.0.0.1`                  | 改 Tailscale IP 手机才能访问，此时必须配 token |
+| `SNIPDECK_PORT`                       | `7878`                       | 避开 TxtTunnel 的 8787               |
+| `SNIP_TOKEN`                          | 空                            | `/api/*` 的 Bearer token（**设了就一律校验，本机也不例外**）；不设时服务只能绑 loopback |
+| `SNIPDECK_DATA` / `SNIPDECK_WEB_DIST` | `data` / `packages/web/dist` | 一般不用改                             |
+
+日志：`data/logs/server.log`（同一时间只允许一个实例，第二条会报「文件被占用」）。
+
+## 开发
+
+```bash
+npm run dev:server          # 7878，后端
+npm run dev:web             # 5173，/api 代理到 7878
+```
+
+> **手机别走 5173**。dev server 是开发产物，没有 hash 校验，也不该暴露给别的设备；手机一律直连 7878。
+
 ## 数据与目录
 
 ```
@@ -153,7 +186,7 @@ data/
 ├─ snippets/**/*.yaml  片段，目录即分组
 ├─ snippets/.trash/    删除片段的副本（*.yaml.txt，不会被当成片段加载）
 ├─ secrets.yaml        密钥（已 gitignore，可选）
-├─ tmp/                复杂命令的临时 .bat（GBK，7 天后自动清）
+├─ tmp/                临时 .bat、UI 脚本的 Chrome profile（`npm run clean:tmp` 清）
 ├─ runs/               运行档案（jsonl，启动时留最近 500 份 / 30 天）
 └─ logs/               服务日志（gitignore）
 ```
@@ -180,7 +213,7 @@ data/
 ## 测试
 
 ```bash
-npm test     # typecheck + lint + ps1 编码 + 队列串行 + 命令保真度 + 搜索 + expect + 导入 + 会话 + API 冒烟（冒烟 103 项）
+npm test     # typecheck + lint + ps1 编码 + 队列串行 + 命令保真度 + 搜索 + expect + 导入 + 会话 + API 冒烟（冒烟 104 项）
 ```
 
 单项：
@@ -191,7 +224,8 @@ npm run test:cmd    --workspace @snipdeck/drivers  # 临时 .bat 的命令语义
 npm run test:search --workspace @snipdeck/core     # 中文子串 / 多词 AND / 大小写与空白（14 项）
 npm run test:expect --workspace @snipdeck/core     # expect 三源 / 编码 / 正则预算 / 轮询等待（40 项）
 npm run test:import --workspace @snipdeck/core     # 历史清洗 / 残句识别 / 危险标记 / 不覆盖（60 项）
-npm run smoke       --workspace @snipdeck/server   # 打真路由：鉴权 / 404 / 脱敏 / 真 SSE 执行
+npm run smoke       --workspace @snipdeck/server   # 打真路由：鉴权 / 404 / 脱敏 / CRUD / 真 SSE 执行（104 项）
+npm run test:session --workspace @snipdeck/server   # 终端会话：PTY / resize / 删除真杀进程 / WS 鉴权
 npm run ui:shot -- http://127.0.0.1:7878/ 390 844 data/tmp/ui.png   # 移动端仿真截图 + 布局测量
 # 四个 ui:* 脚本都会从 .env 读 SNIP_TOKEN 注入页面；服务绑的是 100.x 时记得把地址传进去
 # ⚠️ 量布局请用 mobile: false（见 `npm run ui:editor`）：mobile: true 下 innerWidth 会落在真实窗口宽
@@ -207,12 +241,13 @@ npm run clean:tmp                                  # 清 data/tmp 里 7 天前�
 
 ## 文档
 
-计划已拆成 7 份，**章节编号全局不变**（写「§14」就是 `docs/03-reference.md` 第 14 节）：
+计划已拆成 8 份，**章节编号全局不变**（写「§14」就是 `docs/03-reference.md` 第 14 节）：
 
 - [SnipDeck-PLAN.md](./SnipDeck-PLAN.md) — 总览：文档地图、修订摘要、进度快照
 - [docs/01-design.md](./docs/01-design.md) — 架构、驱动能力边界、数据模型、运行时（§1–§8）
 - [docs/02-roadmap.md](./docs/02-roadmap.md) — 路线图与验收、风险、安全模型、待定项（§9–§12）
 - [docs/03-reference.md](./docs/03-reference.md) — 迁移清单、接口契约、字段参考、部署（§13–§16）
-- [docs/04-phases.md](./docs/04-phases.md) — 各期实施记录与取舍（§17–§22）
-- [docs/00-issues.md](./docs/00-issues.md) — ISSUE-001~017 现场记录与修复（§0.2–§0.9）
+- [docs/04-phases.md](./docs/04-phases.md) — 各期实施记录与取舍（§17–§34）
+- [docs/06-terminal.md](./docs/06-terminal.md) — 网页终端的设计与验收（§23–§29）
+- [docs/00-issues.md](./docs/00-issues.md) — ISSUE-001~026 现场记录与修复（§0.2–§0.9）
 - [docs/05-changelog.md](./docs/05-changelog.md) — 变更日志
