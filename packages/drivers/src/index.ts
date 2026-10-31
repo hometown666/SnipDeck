@@ -13,7 +13,10 @@ export class ReservedDriverError extends Error {
 
 const cache = new Map<string, Driver>()
 
-export function createDriver(target: HostTarget, opts: { tmpDir: string }): Driver {
+export function createDriver(
+  target: HostTarget,
+  opts: { tmpDir: string; extraEnv?: () => Record<string, string> },
+): Driver {
   if (target.driver === 'local' || target.driver === 'ssh') {
     throw new ReservedDriverError(target.driver)
   }
@@ -24,7 +27,8 @@ export function createDriver(target: HostTarget, opts: { tmpDir: string }): Driv
   const key = `exec:${bridgeRoot}`
   let driver = cache.get(key)
   if (!driver) {
-    driver = new ExecDriver({ bridgeRoot, tmpDir: opts.tmpDir })
+    // 缓存的是实例，不缓存 env：extraEnv 是函数，设置改了下一条命令就生效
+    driver = new ExecDriver({ bridgeRoot, tmpDir: opts.tmpDir, extraEnv: opts.extraEnv })
     cache.set(key, driver)
   }
   return driver

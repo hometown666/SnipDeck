@@ -140,6 +140,47 @@ if (existsSync(BRIDGE_DIR)) {
   bad('桥目录', `${BRIDGE_DIR} 不存在`, 'npm run install:bridge')
 }
 
+// 4.5 桥的两条目录（网页 ⚙ → 桥的目录，落 data/settings.json）
+const dataDir = resolve(REPO_ROOT, process.env.SNIPDECK_DATA ?? 'data')
+const settingsFile = join(dataDir, 'settings.json')
+let bridgeSettings = { progDir: '', ahkDir: '' }
+if (existsSync(settingsFile)) {
+  try {
+    const raw = JSON.parse(readFileSync(settingsFile, 'utf8'))
+    bridgeSettings = {
+      progDir: typeof raw.progDir === 'string' ? raw.progDir : '',
+      ahkDir: typeof raw.ahkDir === 'string' ? raw.ahkDir : '',
+    }
+  } catch {
+    bad('settings.json', '解析失败', `删掉 ${settingsFile} 重设一次（服务会当空配置启动）`)
+  }
+}
+
+function reportDir(label, value, whenEmpty, lnk) {
+  if (!value) {
+    warn(label, `未设 —— ${whenEmpty}`)
+    return
+  }
+  if (!existsSync(value)) {
+    bad(label, `${value}（不存在）`, '网页 ⚙ → 桥的目录 改掉，或清空回默认')
+    return
+  }
+  if (lnk) {
+    let n = null
+    try {
+      n = readdirSync(value).filter((f) => f.toLowerCase().endsWith('.lnk')).length
+    } catch {
+      // 读不到就只报路径
+    }
+    ok(label, `${value}${n === null ? '' : `（${n} 个 .lnk）`}`)
+    return
+  }
+  ok(label, value)
+}
+
+reportDir('PROG_DIR', bridgeSettings.progDir, '桥用默认（桌面）', true)
+reportDir('AHK_DIR', bridgeSettings.ahkDir, 'script: 子命令会报错', false)
+
 // 5. launchers
 const launcherDir = join(BRIDGE_DIR, 'launchers')
 if (existsSync(launcherDir)) {

@@ -607,6 +607,7 @@ export function App() {
           tokenInput={tokenInput}
           tokenSet={tokenSet}
           error={tokenError}
+          showEnv={!needToken}
           onChange={setTokenInput}
           onClear={() => {
             setToken('')

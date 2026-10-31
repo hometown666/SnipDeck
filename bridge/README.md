@@ -84,6 +84,7 @@ winget install AutoHotkey.AutoHotkey
   要换目录得同时改这两个文件，`doctor` 与安装脚本默认也按这个路径检查。
 - `ahk.bat` 的中文注释是 UTF-8，而 CMD 按 ANSI 读 `.bat` —— 注释会显示成乱码，
   **这不影响执行**（代码本身全是 ASCII，中文只出现在 `rem` 行）。
-- `lnk` / `admin-lnk` 找的是**桌面**上的 `.lnk`（`[Environment]::GetFolderPath('Desktop')`，
-  人人都有且是平铺的）。你的程序不放在桌面就设环境变量 `PROG_DIR` 指过去。
+- `lnk` / `admin-lnk` 找的是 `.lnk`，默认目录是**桌面**（`[Environment]::GetFolderPath('Desktop')`，
+  人人都有且是平铺的）。你的程序不放在桌面，两个办法：设环境变量 `PROG_DIR`，
+  或者在 **SnipDeck 网页 ⚙ → 桥的目录** 里填（服务会把它注入给 `ahk.bat` 的子进程，下一条命令生效）。
   `script` 子命令要的 `AHK_DIR` **没有默认值**：不是所有人都有这个目录，没设就明确报错，不猜。

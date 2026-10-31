@@ -203,3 +203,13 @@
   - **`npm run install:bridge`**：装到 `C:\ahk_trigger`（`-Target` 可换），内容不同先 `*.bak.<时间戳>`，相同跳过，幂等；`-DryRun` / `-Start`；**不装 AutoHotkey**。
   - **真替换验证**（用户同意停他自己的 listener）：停 watchdog + elevated → 启动仓库版接管 `C:\ahk_trigger` → `snip status` = bridge up、`run check-instence` **53ms**、`run check-status` **739ms** → 恢复计划任务，`status.txt` 回到 `admin=1`。
   - 修 `Write-Host` 在 PS 5.1 下中文乱码（`[Console]::OutputEncoding`）；`doctor` 的中文标签按显示宽度对齐。
+- **v3.4**（2026-10-31，桥的目录上网页 · CI 接冒烟）：
+  - **设置里能改 `PROG_DIR` / `AHK_DIR` 了**：⚙ 弹窗新增「桥的目录」区块，落 `data/settings.json`（已 gitignore）。服务 spawn `ahk.bat` 时把它们注入**子进程环境变量**，所以**不用改桥、不用重启**，下一条命令就生效——这点很重要，本机跑的是定制版 listener，任何「改桥才生效」的方案在它上面都是哑的。
+  - **校验在存的时候做**：`ahk_cmd.ps1` 对不存在的目录会**静默回落**，所以 `PUT /api/settings` 直接拒收非绝对路径 / 不存在 / 不是目录，且**失败不落盘**。空串是合法值（不注入，桥用自身默认）。
+  - **「我填的值」和「生效值」分开显示**：真注入了显示路径与 `.lnk` 个数，没设显示「生效：桌面」/「生效：未配置」。token 的两个按钮改名「保存 token / 清除 token」——两组按钮上下排列时都叫「保存」会分不清。
+  - 新增 `npm run check:bridge`（11 项）：`bridge/` 是给别人的通用件，防有人整份拷回定制版带进私人路径与 `cursor:*`。测试读不到 `.ahk` 源码，只能单列静态检查。
+  - 新增 `npm run test:env`（5 项）：钉住「设置 → env → 子进程」这条链，含「同一实例改完下一条生效」和「注入后 `SystemRoot` 没被挤掉」（传 `env` 时 Node 不合并 `process.env`）。
+  - 新增 `npm run ui:settings`（14 项）：UI 填 → 保存 → API 读回 → 刷新页面还在 → 清空回默认。桌面 1366 与真 390 双过。
+  - **冒烟进 CI**（老缺口）：加 `SNIPDECK_SMOKE_BRIDGE` 注入点，CI 指向不存在的目录走「无桥模式」——跳过 5 条实跑，其余 **111 条**照打真路由。CI 同时加 `build:web`（否则静态壳那组会被跳过）与 `check:bridge` / `test:env`。
+  - `doctor` 多两行：`PROG_DIR` / `AHK_DIR` 的当前值，目录不存在直接 ✗ 并给修复路径。
+  - 冒烟 104 → **116**；主包 gzip 60.04 → **61.81KB**。

@@ -30,6 +30,15 @@ import {
 } from '@snipdeck/core'
 import { createDriver, ExecDriver } from '@snipdeck/drivers'
 import { isKnownShell, knownShells, SessionManager } from './sessions'
+import {
+  countLnks,
+  EMPTY_SETTINGS,
+  envOf,
+  loadSettings,
+  saveSettings,
+  SettingsError,
+  type BridgeSettings,
+} from './settings'
 import { attachTerminalWs } from './terminal-ws'
 
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url))
@@ -108,6 +117,12 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
   )
   const token = opts.token ?? process.env.SNIP_TOKEN ?? ''
 
+  // 桥的两条目录配置：落 data/settings.json（机器级，不进版本库）。
+  // 读进内存后由 extraEnv 在每次 spawn 时注入子进程，改完下一条命令就生效。
+  const settingsFile = resolve(dataDir, 'settings.json')
+  let bridgeSettings: BridgeSettings = loadSettings(settingsFile)
+  const extraEnv = () => envOf(bridgeSettings)
+
   const app = Fastify({ logger: opts.logger ?? true })
   const store = new SnippetStore(snippetsDir)
   store.watchDir()
@@ -156,7 +171,7 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
 
   app.get('/api/health', async () => {
     const { target } = resolveTarget(hosts, undefined)
-    const driver = createDriver(target, { tmpDir })
+    const driver = createDriver(target, { tmpDir, extraEnv })
     const isExec = driver instanceof ExecDriver
     const bridgeUp = isExec ? await driver.health() : false
     return {
@@ -321,6 +336,49 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
     })),
   )
 
+  // ——— 桥的两条目录（PROG_DIR / AHK_DIR）———
+  //
+  // 这两条不是 SnipDeck 自己的配置，是**桥的**：ahk_cmd.ps1 用它们找 .lnk / .ahk。
+  // 服务在 spawn `ahk.bat` 时注入成子进程环境变量，所以改完不用重启、不用改桥。
+  const settingsView = () => {
+    const { target } = resolveTarget(hosts, undefined)
+    const bridgeRoot = target.bridge ?? 'C:\\ahk_trigger'
+    return {
+      progDir: bridgeSettings.progDir,
+      ahkDir: bridgeSettings.ahkDir,
+      // 真正会注入给子进程的东西：空的键不会出现（避免覆盖用户在系统里设的值）
+      injected: envOf(bridgeSettings),
+      bridgeRoot,
+      ahkBatExists: existsSync(resolve(bridgeRoot, 'ahk.bat')),
+      // 设了 progDir 才有意义；null = 没设或读不到
+      lnkCount: countLnks(bridgeSettings.progDir),
+    }
+  }
+
+  app.get('/api/settings', async () => settingsView())
+
+  app.put<{ Body: Partial<BridgeSettings> }>('/api/settings', async (req, reply) => {
+    const body = req.body ?? {}
+    try {
+      bridgeSettings = saveSettings(settingsFile, {
+        progDir: typeof body.progDir === 'string' ? body.progDir : bridgeSettings.progDir,
+        ahkDir: typeof body.ahkDir === 'string' ? body.ahkDir : bridgeSettings.ahkDir,
+      })
+    } catch (e) {
+      if (e instanceof SettingsError) {
+        return reply.code(400).send({ error: e.message, problems: e.problems })
+      }
+      throw e
+    }
+    return settingsView()
+  })
+
+  // 清空即「回到默认」，不给「删除配置」这类额外动作——空字符串本来就是合法状态
+  app.delete('/api/settings', async () => {
+    bridgeSettings = saveSettings(settingsFile, { ...EMPTY_SETTINGS })
+    return settingsView()
+  })
+
   app.post<{
     Body: { id: string; vars?: Record<string, string>; target?: string; targets?: string[]; confirm?: boolean }
   }>('/api/run', async (req, reply) => {
@@ -414,7 +472,7 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
       await Promise.all(
         plan.map(async ({ name, target }, index) => {
           try {
-            const driver = createDriver(target, { tmpDir })
+            const driver = createDriver(target, { tmpDir, extraEnv })
             for await (const ev of runSnippet(snippet, driver, {
               vars,
               defaultTimeout: Number(target.timeout ?? 20),

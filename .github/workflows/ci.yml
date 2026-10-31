@@ -39,11 +39,19 @@ jobs:
         # （ISSUE-017）。这条门禁就是不让它再靠人眼发现。
         run: npm run check:ps1
 
+      - name: bridge/ 护栏（不含私人路径 / cursor 工作流）
+        # 通用版被人整份拷回定制版时，功能不会立刻坏，但会悄悄带进私有路径。
+        # 这条只读源码，不依赖本机环境，适合放 CI。
+        run: npm run check:bridge
+
       - name: 队列必须真串行
         run: npm run test:queue
 
       - name: 命令语义保真度
         run: npm run test:cmd
+
+      - name: 环境变量注入（PROG_DIR / AHK_DIR 到达子进程）
+        run: npm run test:env
 
       - name: 搜索（CJK 子串 + 多词 AND）
         run: npm run test:search
@@ -53,3 +61,14 @@ jobs:
 
       - name: 历史导入（清洗 / 残句 / 危险标记）
         run: npm run test:import
+
+      - name: 构建前端（冒烟会验静态壳与 SPA 回退）
+        run: npm run build:web
+
+      - name: API 冒烟（真实路由 + 无桥降级路径）
+        # CI 上没有 listener。用 SNIPDECK_SMOKE_BRIDGE 指一个不存在的目录，
+        # 冒烟会走「bridgeUp=false → 跳过 /api/run 实跑」那条分支，
+        # 其余 111 条（鉴权 / 404 / 脱敏 / CRUD / 设置）照样打真路由。
+        run: npm run smoke --workspace @snipdeck/server
+        env:
+          SNIPDECK_SMOKE_BRIDGE: 'C:\no-such-bridge'

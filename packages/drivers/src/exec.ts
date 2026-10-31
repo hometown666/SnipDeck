@@ -44,6 +44,13 @@ export type ExecDriverOptions = {
   tmpDir: string
   defaultTimeout?: number
   tmpTtlMs?: number
+  /**
+   * 每次 spawn 时现取的环境变量（如 PROG_DIR / AHK_DIR）。
+   *
+   * 传函数而不是对象：这两个值能在网页上改，改完必须**下一条命令**就生效，
+   * 不能要求重建驱动或重启服务。返回空对象等于不注入。
+   */
+  extraEnv?: () => Record<string, string>
 }
 
 export class ExecDriver implements Driver {
@@ -202,7 +209,14 @@ export class ExecDriver implements Driver {
 
     const command = req.shell === 'powershell' ? 'powershell.exe' : 'cmd.exe'
     // windowsHide：服务将来以计划任务（无控制台）运行时，避免每条命令闪一个黑框
-    const child = spawn(command, args, { windowsVerbatimArguments: verbatim, windowsHide: true })
+    // env：必须整个给出（Node 不会在传入 env 时再帮你合并 process.env），
+    // 否则 PATH/SystemRoot 全丢，cmd 连 echo 都跑不起来
+    const extra = this.opts.extraEnv?.() ?? {}
+    const child = spawn(command, args, {
+      windowsVerbatimArguments: verbatim,
+      windowsHide: true,
+      env: { ...process.env, ...extra },
+    })
 
     const outChunks: Buffer[] = []
     const errChunks: Buffer[] = []

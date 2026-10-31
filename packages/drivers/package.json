@@ -15,6 +15,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test:queue": "tsx scripts/test-queue.mts",
-    "test:cmd": "tsx scripts/test-cmd.mts"
+    "test:cmd": "tsx scripts/test-cmd.mts",
+    "test:env": "tsx scripts/test-env.mts"
   }
 }

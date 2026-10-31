@@ -1516,3 +1516,44 @@ body {
     min-height: 180px;
   }
 }
+
+/* ——— 设置弹窗 · 桥的目录（§36） ———
+   两条路径是机器级的，放在 token 下面而不是单独一个页面：
+   它们改的是「本机怎么找程序」，跟这个设备强绑定，和 token 是同一类东西。 */
+.modal.settings {
+  max-width: 560px;
+}
+
+.env-section {
+  border-top: 1px solid var(--border);
+  margin-top: 18px;
+  padding-top: 14px;
+}
+
+.env-section h4 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.env-section h4 em {
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-2);
+}
+
+.env-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* 保存回执：绿字但别用大色块，这是个次要反馈 */
+.ok-note {
+  color: var(--accent);
+}

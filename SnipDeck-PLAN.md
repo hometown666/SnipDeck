@@ -51,7 +51,9 @@ issue 侧：`ISSUE-001 ~ 028` **全部已修**（001–008 于 10-29，009–016
 | ~~片段 CRUD / Raw 编辑 API~~ | ✅ **CRUD 已做 · 2026-10-31**（新建 / 编辑 / 改名 / 删除全通）；**原文 YAML 编辑未做** | §33、§14 写入语义 |
 | ~~原文 YAML 编辑~~ | ✅ **已完成 · 2026-10-31**（编辑器切「原文」，逐字落盘不重排） | §33、§14 两条写路径 |
 | ~~上 HTTPS 前先改鉴权~~ | ✅ **已改 · 2026-10-31**（方案 D：有 token 一律校验，删掉 loopback 豁免） | §12-1、ISSUE-023 |
-| **CI 不跑 smoke / test:session** | 未做 —— 路由层、CRUD、鉴权在 CI 里零覆盖（smoke 自己会跳过需要桥的用例，本来就适合 CI） | `.github/workflows/ci.yml`、§16 |
+| ~~CI 不跑 smoke~~ | ✅ **已接 · 2026-10-31**（`SNIPDECK_SMOKE_BRIDGE` 注入点 → 无桥模式跑 111 条；同时补 `build:web`、`check:bridge`、`test:env`）。`test:session` 仍不进 CI | `.github/workflows/ci.yml`、§16、§36 |
+| 桥的两条目录上网页（`PROG_DIR` / `AHK_DIR`） | ✅ **已做 · 2026-10-31**（⚙ → 桥的目录，落 `data/settings.json`，注入子进程 env） | §36、§14 |
+| `hosts.yaml` 目标管理（增删目标 / bridge 路径 / 超时） | 未做 —— 加一台机器仍要手改 YAML；`bridge` 路径也是机器级配置 | §36.6 |
 
 ---
 

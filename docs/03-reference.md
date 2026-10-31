@@ -57,9 +57,21 @@
 | DELETE | `/api/snippets/:id` | — | 200 `{ok,id,backup}`；删除前先把副本放进 `snippets/.trash/<id>-<时间戳>.yaml.txt` |
 | POST | `/api/snippets/:id/preview` | `{vars}` | `{cmds,pending,missing,redacted}`；secret 渲染为 `***`；未填变量保留 `{{x}}` |
 | GET | `/api/hosts` | — | `{name,driver,reserved,default}[]` |
+| GET | `/api/settings` | — | `{progDir,ahkDir,injected,bridgeRoot,ahkBatExists,lnkCount}`；`progDir/ahkDir` 是**用户填的**，`injected` 是真正注入给 `ahk.bat` 的环境变量（空值不出现） |
+| PUT | `/api/settings` | `{progDir?,ahkDir?}` | 同 GET；路径非绝对 / 不存在 / 不是目录 → 400（`problems[]`）；**校验失败不落盘** |
+| DELETE | `/api/settings` | — | 清空，回默认（等价 PUT 两个空串） |
 | POST | `/api/run` | `{id,vars?,targets?,target?,confirm?}` | `text/event-stream`；每条事件带 `target` + `targetIndex`；首条 `start` 额外带 `runId` |
 | GET | `/api/runs` | `?limit=20&snippet=<id>` | `RunListItem[]`（倒序）；每项是档案首行 `meta` + 末行 `summary` 的合并，带 `ok/durationMs/panes/eventCount` |
 | GET | `/api/runs/:runId` | — | `{meta, events, summary}`；`runId` 不匹配 `^\d{8}-\d{6}-[a-z0-9]{4}$` 直接 404（不做路径拼接，不读穿目录） |
+
+**`PROG_DIR` / `AHK_DIR` 是桥的配置，不是 SnipDeck 的**
+
+这两条只被 `ahk_cmd.ps1` 用：在哪个目录找 `.lnk`（`lnk:` / `admin-lnk:`）、在哪个目录找 `.ahk`（`script:`）。
+服务在 spawn `ahk.bat` 时把它们注入**子进程环境变量**（`extraEnv` 每次现取），所以：
+
+- 改完**下一条命令**就生效，不用重启服务，也不用改桥；
+- 空字符串 = **不注入**，`ahk_cmd.ps1` 回落到它自己的默认值（`PROG_DIR` 默认桌面，`AHK_DIR` 没有默认）；
+- 落盘在 `data/settings.json`（gitignore），因为这是机器级配置，同一仓库在两台机器上本来就不同。
 
 `/api/run` 的目标入参优先级：`targets[]` > `target` > 片段 `target` > hosts 的 `default`。`targets[]` 里**同一目标可以重复**（同目标多开），最多 8 个。
 
@@ -136,11 +148,12 @@
 | 配置 | 复制 `.env.example` 为 `.env`（已 gitignore） |
 | 服务启动器 | `npm run sync:launchers` —— 生成 GBK 的 `%AHK_ROOT%\launchers\{hexo,txttunnel,backtrans}.bat`；`shell` 片段依赖它 |
 | Lint | `npm run lint`（eslint 9 flat config，`eslint.config.mjs`）。**只拦错不排格式**——没有 prettier，免得一次把 5000 行重排成没法 review 的 diff |
-| 环境自检 | `npm run doctor` —— **只读**：Node 版本、AutoHotkey v2、`C://ahk_trigger` 与三个桥文件（连行数一起报，能看出是不是空文件）、launchers、`.env`、token 与 HOST 的组合、服务是否在跑、桥是否 up；另比对**仓库这份 vs 已装那份**（不一致给 `~ 版本` 提示，不判错）。每条失败都带一条修复命令；有 ✗ 时退出码 1 |
-| 装桥 | `npm run install:bridge` —— 把 `bridge/` 的三个文件拷到 `C://ahk_trigger`（`-Target <目录>` 可换）。**注意「装在哪」不等于「运行的是哪份」**：自启指向别处时，装完还得改自启。目标已存在且内容不同**先备份成 `*.bak.<时间戳>` 再覆盖**（本机那份可能被改过）；内容相同跳过；`-DryRun` 只看，`-Start` 装完启动 listener。**不装 AutoHotkey**，没装只打印 winget 命令 |
+| 环境自检 | `npm run doctor` —— **只读**：Node 版本、AutoHotkey v2、`C:\ahk_trigger` 与三个桥文件（连行数一起报，能看出是不是空文件）、launchers、`.env`、token 与 HOST 的组合、服务是否在跑、桥是否 up；另比对**仓库这份 vs 已装那份**（不一致给 `~ 版本` 提示，不判错）。每条失败都带一条修复命令；有 ✗ 时退出码 1 |
+| 装桥 | `npm run install:bridge` —— 把 `bridge/` 的三个文件拷到 `C:\ahk_trigger`（`-Target <目录>` 可换）。**注意「装在哪」不等于「运行的是哪份」**：自启指向别处时，装完还得改自启。目标已存在且内容不同**先备份成 `*.bak.<时间戳>` 再覆盖**（本机那份可能被改过）；内容相同跳过；`-DryRun` 只看，`-Start` 装完启动 listener。**不装 AutoHotkey**，没装只打印 winget 命令 |
+| 桥的目录 | 网页 ⚙ → **桥的目录**（`GET/PUT/DELETE /api/settings`）：`PROG_DIR`（找 `.lnk`）与 `AHK_DIR`（跑 `.ahk`）。落 `data/settings.json`（已 gitignore），服务 spawn `ahk.bat` 时注入成子进程环境变量，**改完下一条命令生效**；留空 = 不注入，桥用自身默认（`PROG_DIR` 桌面 / `AHK_DIR` 无默认）。服务端拒收非绝对路径与不存在的目录——`ahk_cmd.ps1` 在目录缺失时会**静默回落**，「设了但没生效」比报错难查得多 |
 | 清临时产物 | `npm run clean:tmp` —— 删 `data/tmp` 下 7 天前的 `run-*.cmd`、`*-profile`（CDP 的 Chrome profile，每个十几 MB）与 `pty-probe/node_modules`（P5 前置验证装过的 node-pty，64MB；同目录的 `probe*.cjs` / `RESULT.md` 是文档引用的复现材料，不删）；`--dry` 只看，`--days N` 改期限，`--all` 忽略年龄全删 profile。UI 脚本启动时也会各自判断 profile 超过 1 天没用就重建（`scripts/lib/profile.mjs`） |
-| CI | `.github/workflows/ci.yml`（windows-latest）：`npm ci` → typecheck → lint → check:ps1 → queue / cmd / search / expect / import。**smoke 与三个 `ui:*` 故意不进 CI**，它们要 listener.ahk / Chrome / 在线服务 |
-| 测试 | `npm test` = typecheck + lint + `check:ps1` + `test:queue` + `test:cmd` + `test:search`(14) + `test:expect`(40) + `test:import`(60) + smoke（66 项）。`check:ps1` 扫全仓 `.ps1` 验 UTF-8 BOM 与语法（ISSUE-017 的防回归，见 §0.9）。冒烟 fixture 落系统 temp（`mkdtemp`），跑完自动删；**清理失败只 warn，不改退出码**——本机注入的 safe-delete shim 曾让全绿的测试红掉（ISSUE-004）。静态壳免 token 的 5 条用例在 `packages/web/dist` 不存在时整组跳过并打 `~`（先 `npm run build:web`）。多目标的 5 条校验 + 4 条实跑用例用**不打桥**的 `ping -n 3` 片段，listener 离线也跑（串行断言靠事件区间不重叠 + 总耗时 ≥ 3.5s）。运行档案的 12 条用例在临时数据目录里真跑两次 run 再读盘（含 secret 不落盘、`reason` 归类、列表不含存储用的 `kind`）。`expect` 的文件源另测 4 种编码（UTF-16 LE/BE 有无 BOM、GBK）与 CRLF 锚点，正则执行有 500ms 预算（回溯炸弹会被截断而不是拖死服务）。搜索语义 `npm run test:search`；多目标 UI `npm run ui:multi`；历史回放 UI `npm run ui:history`（后两个需服务在线，不进 `npm test`） |
+| CI | `.github/workflows/ci.yml`（windows-latest）：`npm ci` → typecheck → lint → check:ps1 → check:bridge → queue / cmd / env / search / expect / import → build:web → smoke。**冒烟进 CI 用的是「无桥模式」**：`SNIPDECK_SMOKE_BRIDGE` 指一个不存在的目录，`bridgeUp=false` 那条分支会跳过 5 条实跑用例，其余照常打真路由（111 条）。三个 `ui:*` 仍不进 CI——它们要真 Chrome + 在线服务 + listener |
+| 测试 | `npm test` = typecheck + lint + `check:ps1` + `check:bridge`(11) + `test:queue` + `test:cmd`(8) + `test:env`(5) + `test:search`(14) + `test:expect`(40) + `test:import`(60) + `test:session` + smoke（**116 项**）。`check:bridge` 是 `bridge/` 的静态护栏：不能含私人路径、不能带回 `cursor:*`、`ahk_cmd.ps1` 必须有 BOM。`check:ps1` 扫全仓 `.ps1` 验 UTF-8 BOM 与语法（ISSUE-017 的防回归）。冒烟 fixture 落系统 temp（`mkdtemp`），跑完自动删；**清理失败只 warn，不改退出码**（ISSUE-004）。静态壳免 token 的 5 条用例在 `packages/web/dist` 不存在时整组跳过并打 `~`（先 `npm run build:web`）。`test:env` 钉的是「网页上改的 PROG_DIR / AHK_DIR 真的到达子进程」：注入、不注入、同一实例改完立刻生效、以及注入后 `SystemRoot` 这类基础环境没被 env 覆盖挤掉。UI 侧另有 `npm run ui:multi` / `ui:history` / `ui:editor` / `ui:settings`（需服务在线，不进 `npm test`） |
 
 | 环境变量 | 默认 | 说明 |
 |---|---|---|

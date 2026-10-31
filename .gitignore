@@ -11,6 +11,8 @@ Screenshot_*.jpg
 data/secrets.yaml
 # local env (SNIP_TOKEN etc.), copy .env.example to .env
 .env
+# 桥的两条目录配置（PROG_DIR / AHK_DIR）——每台机器不一样，网页上改的就是它
+data/settings.json
 # server logs (scripts/start-server.ps1)
 data/logs/
 # temp batch files run-<runId>.cmd

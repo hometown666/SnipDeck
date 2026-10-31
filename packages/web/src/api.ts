@@ -25,6 +25,18 @@ export type HostView = {
   default: boolean
 }
 
+/** 桥的两条目录配置：PROG_DIR 找 .lnk，AHK_DIR 跑 .ahk */
+export type BridgeSettingsView = {
+  progDir: string
+  ahkDir: string
+  /** 真正注入给 ahk.bat 子进程的环境变量；空对象 = 不注入，用脚本默认值 */
+  injected: Record<string, string>
+  bridgeRoot: string
+  ahkBatExists: boolean
+  /** 只数一层；null = 没设或读不到 */
+  lnkCount: number | null
+}
+
 /** 片段的一个步骤：与 core 的 Step 联合类型对齐（编辑器要把它完整读回来再写回去） */
 export type SnippetStep =
   | { do: 'run'; cmd: string; timeout?: number; optional?: boolean; queue?: boolean }
@@ -273,6 +285,10 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   snippets: () => req<SnippetView[]>('/api/snippets'),
   hosts: () => req<HostView[]>('/api/hosts'),
+  settings: () => req<BridgeSettingsView>('/api/settings'),
+  saveSettings: (input: { progDir: string; ahkDir: string }) =>
+    req<BridgeSettingsView>('/api/settings', { method: 'PUT', body: JSON.stringify(input) }),
+  clearSettings: () => req<BridgeSettingsView>('/api/settings', { method: 'DELETE' }),
   health: () => req<HealthView>('/api/health'),
   /** 编辑用：完整字段 + mtime（列表里的 SnippetView 只有摘要） */
   snippetDetail: (id: string) =>

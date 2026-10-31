@@ -16,6 +16,10 @@ const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url))
 // 2) 不会和真实 run 生成的 run-*.cmd 混在一起被 sweepTmp 误清。
 const FIXTURE = mkdtempSync(join(tmpdir(), 'snipdeck-smoke-'))
 const TOKEN = 'smoke-token'
+// 桥目录可换：CI 上没有 listener，指向一个不存在的目录就能覆盖「桥不在线」那条降级路径。
+// 本机不设这个变量，照旧打真桥。
+const BRIDGE = process.env.SNIPDECK_SMOKE_BRIDGE ?? 'C:\\ahk_trigger'
+const BRIDGE_YAML = BRIDGE.replace(/\\/g, '\\\\')
 
 function writeFixture(rel: string, content: string): void {
   const file = join(FIXTURE, rel)
@@ -45,7 +49,7 @@ writeFixture(
     '  driver: exec',
     '  default: true',
     '  shell: cmd',
-    '  bridge: C:\\ahk_trigger',
+    `  bridge: ${BRIDGE_YAML}`,
     '  timeout: 20',
     'home-win:',
     '  driver: local',
@@ -65,7 +69,7 @@ writeFixture(
     'shell: cmd',
     'steps:',
     '  - do: run',
-    '    cmd: call C:\\ahk_trigger\\ahk.bat instances',
+    `    cmd: call ${BRIDGE_YAML}\\ahk.bat instances`,
     '    queue: false',
     '',
   ].join('\n'),
@@ -310,6 +314,74 @@ check(
   ),
 )
 check('home-win / vps 标记 reserved', hs.filter((t: { reserved: boolean }) => t.reserved).length === 2)
+
+// 5.1 桥的目录配置（PROG_DIR / AHK_DIR）
+const st0 = (await app.inject({ method: 'GET', url: '/api/settings', headers: auth })).json()
+check(
+  'settings 初始为空且不注入',
+  st0.progDir === '' && st0.ahkDir === '' && Object.keys(st0.injected).length === 0,
+  JSON.stringify(st0),
+)
+check('settings 带桥目录诊断', typeof st0.bridgeRoot === 'string' && st0.bridgeRoot.length > 0)
+
+// 用 FIXTURE 自己当目录：一定存在、是绝对路径、靠谱地跨机器
+const putOk = await app.inject({
+  method: 'PUT',
+  url: '/api/settings',
+  headers: auth,
+  payload: { progDir: FIXTURE, ahkDir: FIXTURE },
+})
+const putBody = putOk.json()
+check('PUT settings → 200', putOk.statusCode === 200, String(putOk.statusCode))
+check(
+  '注入值就是填的值',
+  putBody.injected?.PROG_DIR === FIXTURE && putBody.injected?.AHK_DIR === FIXTURE,
+  JSON.stringify(putBody.injected),
+)
+check('落盘成 settings.json', existsSync(join(FIXTURE, 'settings.json')))
+check(
+  '落盘内容可解析且不含多余字段',
+  JSON.stringify(JSON.parse(readFileSync(join(FIXTURE, 'settings.json'), 'utf8'))) ===
+    JSON.stringify({ progDir: FIXTURE, ahkDir: FIXTURE }),
+)
+check('lnkCount 是数字（空目录为 0）', putBody.lnkCount === 0, String(putBody.lnkCount))
+
+const st1 = (await app.inject({ method: 'GET', url: '/api/settings', headers: auth })).json()
+check('GET 立刻读到刚存的值（不用重启）', st1.progDir === FIXTURE, st1.progDir)
+
+const putMissing = await app.inject({
+  method: 'PUT',
+  url: '/api/settings',
+  headers: auth,
+  payload: { progDir: join(FIXTURE, 'no-such-dir') },
+})
+check(
+  '不存在的目录 → 400 且说清楚哪条不对',
+  putMissing.statusCode === 400 && String(putMissing.body).includes('不存在'),
+  `${putMissing.statusCode} ${putMissing.body}`,
+)
+
+const putRelative = await app.inject({
+  method: 'PUT',
+  url: '/api/settings',
+  headers: auth,
+  payload: { ahkDir: 'relative\\path' },
+})
+check(
+  '相对路径 → 400',
+  putRelative.statusCode === 400 && String(putRelative.body).includes('绝对路径'),
+  `${putRelative.statusCode} ${putRelative.body}`,
+)
+
+// 400 不能把已存的值改坏：失败后仍是上一次成功的那份
+const st2 = (await app.inject({ method: 'GET', url: '/api/settings', headers: auth })).json()
+check('校验失败不落盘', st2.progDir === FIXTURE && st2.ahkDir === FIXTURE, JSON.stringify(st2))
+
+const delSettings = await app.inject({ method: 'DELETE', url: '/api/settings', headers: auth })
+check(
+  'DELETE settings → 回到空',
+  delSettings.json().progDir === '' && delSettings.json().ahkDir === '',
+)
 
 // 6. 未知 /api 路径 → JSON 404（不是 SPA 的 index.html）
 const unknown = await app.inject({ method: 'GET', url: '/api/nope', headers: auth })
