@@ -497,6 +497,26 @@ export function App() {
         : ''
   const drawerState = running ? 'running' : panes.length > 0 && panes.every((p) => p.ok) ? 'ok' : 'fail'
 
+  // 跑完了但手机锁屏 / 人在别的标签页，怎么知道结果？改标题是最便宜的那个办法。
+  //
+  // 为什么不用 Notification：它和 service worker 一样**只在安全上下文可用**，
+  // 而现在手机访问的是 `http://100.99.x.x:7878`。通知这件事被 HTTPS 卡住了，
+  // 等 docs/02-roadmap.md §12-1 那条决策定了再说；标题变化不依赖任何权限，先顶上。
+  useEffect(() => {
+    const base = 'SnipDeck'
+    if (!output) {
+      document.title = base
+      return
+    }
+    const total = output.panes.length
+    if (running) {
+      document.title = `⏳ ${doneCount}/${total} · ${base}`
+      return
+    }
+    const allOk = output.panes.every((p) => p.ok)
+    document.title = `${allOk ? '✓' : '✗'} ${okCount}/${total} · ${base}`
+  }, [output, running, doneCount, okCount])
+
   return (
     <div className="app">
       <Topbar

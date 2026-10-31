@@ -87,10 +87,14 @@
 仍待定：
 
 1. 是否用 `tailscale serve` 上 HTTPS。能顺带拿到 Tailscale 身份头、省掉手填 token，但多一层要维护的反向代理；当前是「Tailscale 网络边界 + `SNIP_TOKEN`」。
-   > **前置的鉴权改造已于 2026-10-31 落地（方案 D）**：删掉了 `isLoopback(req.ip)` 豁免，只要服务设了 `SNIP_TOKEN`，从 `127.0.0.1` 转进来的请求同样要 `Bearer`。所以「反代一转手就把 token 关掉」这条风险已经不存在（ISSUE-023）。
-   > 剩下的判断与实现无关：要不要为了「省掉手填 token」而引入一层反代。若上，下一步是**校验 Tailscale 身份头**（`Tailscale-User-Login`）替代共享 token；注意 Fastify 默认不信任 `X-Forwarded-For`，届时 `req.ip` 仍是反代地址，不要再用它做任何授权判断。
+   > **前置的鉴权改造已于 2026-10-31 落地（方案 D）**：删掉了 `isLoopback(req.ip)` 豁免，只要服务设了 `SNIP_TOKEN`，从 `127.0.0.1` 转进来的请求同样要 `Bearer`。所以「反代一转手就把 token 关掉」这条风险已经不存在（ISSUE-023），现在纯粹是一个取舍题。
+   > **真正被卡住的是 PWA**：service worker 与 `Notification` 都只在安全上下文可用。现在手机访问 `http://100.99.202.54:7878`，「加到主屏」只是个快捷方式——没有离线缓存、没有通知。要么上 `tailscale serve` 让它们真生效，要么接受「手机端 = 快捷方式」并把预期写进 README。**先定这一条，再谈要不要为省 token 引入反代**。
+   > 若上，下一步是校验 Tailscale 身份头（`Tailscale-User-Login`）替代共享 token；注意 Fastify 默认不信任 `X-Forwarded-For`，届时 `req.ip` 仍是反代地址，不要再用它做任何授权判断。
 2. 配对二维码（照搬 TxtTunnel）何时做。现在手机首次访问要手动粘贴 token 到 localStorage。
 3. Powershell 包 snippet 的处理：`Invoke-AhkLnk` 归一成 `ahk.bat lnk`，还是 exec 驱动支持 dot-source `ahk.ps1` 后调函数。归一更简单，但会丢掉 PS 包的会话级变量。
 4. ~~`runs/<runId>.jsonl` 与 `targets[]` 谁先做~~ → **已定**：`runs/*.jsonl` 归 P4（排障体验优先），`targets[]` 归 P3（数据结构），跨机并列随 P5 的 ssh 一起验收（**跨机并列后于 10-30 废弃**，见 §9.1）。
-5. 网页终端的四条待定（`GET /api/sessions` 要不要暴露给片段坞页、SSH 凭据放哪、`driver: ssh` 要不要兼做 exec、旧 `spawn.ts` 抽取是否保留）见 [06-terminal.md](06-terminal.md) §29。
+5. 网页终端的待定只剩一条：`GET /api/sessions` 要不要暴露给片段坞页（顶栏显示「2 个会话在跑」），见 [06-terminal.md](06-terminal.md) §29。
+   ~~SSH 凭据放哪~~、~~`driver: ssh` 要不要兼做 exec~~ **已随 P5.3 砍掉 SSH 一并作废（2026-10-30）**；~~旧 `spawn.ts` 抽取是否保留~~ **已定：不保留**（随 P5.1 撤回）。
+6. **定时执行（cron）** —— 未排期，也还没决定要不要做。真要做先定三件事：① 失败要不要重试、几次；② 机器关机 / 休眠期间错过的触发点要不要补跑；③ 调度器放在服务进程里（简单，但服务重启就丢）还是单独一个（要处理单实例）。
+   数据模型上不难（`steps` 已经有了，加一个 `schedule` 字段），难的是上面这三条语义——**定不下来就别做，半套的定时比没有定时更误导人**。
 

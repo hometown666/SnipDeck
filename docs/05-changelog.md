@@ -189,3 +189,8 @@
   - `meta` 里非字符串的值（对象/数组）仍然不展示在表单里，但**现在可以切「原文」改**。
   - 冒烟 94 → **103**（原文读写 9 条：注释存活、逐字一致、坏 YAML 带行号且不落盘、改 id 搬家）；`ui:editor` 16 → **26 项**（原文读内容、行号行数一致、行号与正文对齐、不自动折行、插注释、保存后注释还在、副本生成与清理）。
   - 修 ISSUE-026：UI 脚本用 `textContent.includes(id)` 找卡片，而 `<id>` 是 `<id>-copy` 的前缀——**差点删错条目**。改成按 `.card-meta` 的 id 精确匹配。
+- **v3.2**（2026-10-31，维护期收尾）：
+  - **CLI 补 `cat` / `edit`**：`snip cat <id>` 打原文，`snip edit <id>` 用 `$VISUAL` / `$EDITOR` 打开（缺省 notepad / vi，用 shell 执行以支持 `code -w` 这类带参数的编辑器）。
+  - **跑完看标题**：`document.title` 显示 `⏳ 1/2 · SnipDeck` / `✓ 2/2` / `✗ 1/2`。**没用 `Notification`**——它和 service worker 一样只在安全上下文可用，而手机访问的是 http；这件事实际被 HTTPS 卡着（§12-1）。
+  - **`clean:tmp` 补第三类**：`pty-probe/node_modules`（P5 前置验证的 node-pty，63MB）。实清 **145MB**，`data/tmp` 174MB → 24MB。探针脚本与 `RESULT.md` 保留。
+  - 文档：§12-1 重写（鉴权已改完，剩下的是 PWA 决策）、§12-5 里 SSH 相关待定划掉、新增「定时执行」待定项与三条前置语义、§34 记本轮、PLAN 待办表补 CI 缺口。

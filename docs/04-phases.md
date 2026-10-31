@@ -554,3 +554,17 @@ npm run ui:shot -- http://127.0.0.1:7878/ 390  844  data/tmp/ui-mobile-regress.p
 - **`meta` 的非字符串值在表单里不可编辑**：对象/数组进 `hiddenMeta` 原样带回，要改只能切「原文」。
 - **手机顶栏隐藏了品牌名**：390 宽下「品牌名 + 4 个按钮 + 状态徽标」挤不下，tab 会被压到竖排。现在手机上只留 `{}`。
 - **UI 脚本的视口一直是错的**：`Emulation.setDeviceMetricsOverride` 在 `--headless=new` 且 `mobile: true` 时，若不给 `screenWidth/screenHeight`，`innerWidth` 会落在真实窗口宽（427）而只有 `visualViewport` 是 390。这意味着 **2026-10-31 之前所有写「390 验收」的地方，实际量的是 427**。已补 `screenWidth/screenHeight`（ISSUE-024）；要量布局仍建议用 `mobile: false`（`npm run ui:editor` 就是这么做的）。
+
+## 34. 维护期收尾（2026-10-31，不进新功能）
+
+**背景**：P0–P6 完成后，`SnipDeck-PLAN.md` 的「待办」表四行全部划线。检查代码与 CI 后发现三处「不做不会立刻坏、但会慢慢烂」的地方。这一节记的是**没写进 plan 就顺手做掉**的部分；写进 plan 的三条（CI 接 smoke、§12-1 重写、定时执行入待定）在 `02-roadmap.md` §12。
+
+| 项 | 做了什么 | 为什么 |
+|---|---|---|
+| `data/tmp` 174MB | `clean:tmp` 增加第三类清理：`pty-probe/node_modules`（P5 前置验证装过的 node-pty，63MB）。实清 **145MB**（8 个 Chrome profile 约 72MB + 依赖 63MB + 若干 `run-*.cmd`） | 原脚本只管 `run-*.cmd` 与 `*-profile`，而 P5 的探针目录里躺着一个 63MB 的依赖树。**探针脚本本身留着**（文档引用了它），只删依赖——需要时 `npm install` 重装 |
+| CLI 只能跑不能看 | 新增 `snip cat <id>`（打印原文）与 `snip edit <id>`（`$VISUAL` / `$EDITOR`，缺省 notepad / vi） | `snip list` 只给摘要，想看一条片段到底写了什么只能去翻文件。`edit` 用 shell 执行是为了 `code -w`、`subl -n -w` 这类带参数的编辑器 |
+| 跑完不知道结果 | `document.title` 反映最近一次运行：运行中 `⏳ 1/2 · SnipDeck`，结束 `✓ 2/2` / `✗ 1/2` | 手机锁屏或人在别的标签页，抽屉看不见。改标题不依赖任何权限，切回来一眼就知道 |
+
+**一条被卡住的判断**：本来想用 `Notification` API 做真通知，发现它和 service worker 一样**只在安全上下文可用**——手机现在访问的是 `http://100.99.202.54:7878`，那条路走不通。所以「跑完通知」这件事实际被 HTTPS 卡着，标题变化只是退而求其次。这让 `02-roadmap.md` §12-1 那条决策的优先级更高了：**它不只是「要不要省 token」，还决定 PWA 与通知能不能真生效**。
+
+**验收**：`snip cat open-shell` 打出完整原文（含 `>` 折叠块）；`npm run ui:shot -- <url> 1366 900 out.png "check-status"` 跑完后 `document.title` = `✓ 1/1 · SnipDeck`；`npm run clean:tmp -- --days 0` 释放 145.1MB，`data/tmp` 174MB → 24MB。

@@ -2,10 +2,12 @@
 /**
  * 清 data/tmp：临时 .cmd 与 CDP profile 目录。
  *
- * 为什么要有：data/tmp 里有两类垃圾会一直长——
+ * 为什么要有：data/tmp 里有三类垃圾会一直长——
  *   1. run-<runId>.cmd  每次走「复杂命令」路径留一份，默认保留 7 天供排查；
- *   2. *-profile/       四个 UI 回归脚本的 Chrome --user-data-dir，各十几 MB。
- * 服务端的 prune 只管 data/runs，管不到这里；实测堆到 64MB。
+ *   2. *-profile/       各 UI 回归脚本的 Chrome --user-data-dir，各十几 MB；
+ *   3. pty-probe/node_modules/  P5 前置验证时装过 node-pty，64MB。
+ *      同目录的 probe*.cjs 与 RESULT.md 是文档引用的复现材料，**不删**。
+ * 服务端的 prune 只管 data/runs，管不到这里；实测堆到 174MB。
  *
  * 用法：
  *   npm run clean:tmp            # 删 7 天前的（run-*.cmd 与 *-profile）
@@ -63,6 +65,30 @@ for (const name of readdirSync(tmpDir)) {
     console.log(`  ✓ 删除 ${name}  ${mb(size)}`)
     freed += size
     count++
+  }
+}
+
+// 探针目录里的依赖：`probe*.cjs` 与 `RESULT.md` 是文档引用的复现材料，留着；
+// 但 `node-pty` 装出来的 64MB `node_modules` 不该常驻——需要时 `npm install` 重装即可。
+const probeDeps = join(tmpDir, 'pty-probe', 'node_modules')
+if (existsSync(probeDeps)) {
+  let expired = all
+  try {
+    expired = expired || statSync(probeDeps).mtimeMs < cutoff
+  } catch {
+    expired = false
+  }
+  if (!expired) {
+    kept.push('pty-probe/node_modules')
+  } else {
+    const size = dirSize(probeDeps)
+    if (dry) {
+      console.log(`  · 会删 pty-probe/node_modules  ${mb(size)}`)
+    } else if (removeQuietly(probeDeps)) {
+      console.log(`  ✓ 删除 pty-probe/node_modules  ${mb(size)}`)
+      freed += size
+      count++
+    }
   }
 }
 

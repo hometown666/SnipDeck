@@ -12,7 +12,7 @@
 - **危险动作**：`danger: true` 的片段先确认，并可预览渲染后的最终命令行
 - **单车道队列**：`command.txt` 只能一条一条来，走桥的命令严格 FIFO，前端会显示排队时长
 - **网页里改片段**（P6）：顶栏 `＋` 新建（快捷键 `N`）、卡片右下角 `✎` 编辑（`E`）。两种模式——**表单**覆盖 vars / steps / meta 全字段（保存会重排 YAML），**原文**直接改 YAML 文本（逐字落盘，注释和排版都留住）。改 `id` 会自动搬文件；「另存副本」按 `<id>-copy` 新建；删除进 `snippets/.trash/`。编辑期间文件被别人改过会 409，不静默覆盖
-- **CLI**：任意 SSH 终端（Termius、手机、iPad）里 `snip run <id>`
+- **CLI**：任意 SSH 终端（Termius、手机、iPad）里 `snip run <id>`；`snip cat <id>` 看原文，`snip edit <id>` 用 `$EDITOR` 直接改
 - **执行目标**：`win-desktop`（exec 驱动，经 `ahk.bat` 驱动桌面 GUI）
 - **多目标执行**：卡片右上角 `⊕` 打开目标选择器；**同一个目标可以重复添加**——只有一台可执行机器时，这就是「同目标多开」，结果在抽屉里并列成 N 块面板，事件按目标分流
 - **`expect` 条件步**：片段里除了「跑」和「等」还能断言文本：`match` 正则 + `from`（上一步输出 / 全部输出 / 轮询一个文件）。等日志里出现 `Hexo is running at` 不再是 sleep 猜时长
@@ -174,7 +174,7 @@ data/
 | `packages/core`    | 片段模型、YAML 读写、变量渲染、索引、运行编排                             |
 | `packages/drivers` | `exec` 驱动（cmd / powershell + 全局串行队列）                  |
 | `packages/server`  | Fastify：REST + SSE + 静态托管                             |
-| `packages/cli`     | `snip list / search / run / hosts / status / reindex / runs / import-history` |
+| `packages/cli`     | `snip list / search / cat / edit / run / hosts / status / reindex / runs / import-history` |
 | `packages/web`     | Vite + React + PWA                                    |
 
 ## 测试
@@ -202,7 +202,7 @@ npm run ui:editor                                 # 片段编辑器：开/改/�
 npm run test:session-reap                          # 会话回收，**真 60 秒**两条路径（约 70s，不进 npm test）
 npm run lint                                       # eslint：只拦错，不排格式
 npm run check:ps1                                  # .ps1 必须 UTF-8 with BOM 且语法可解析（PS 5.1 的坑）
-npm run clean:tmp                                  # 清 data/tmp 里 7 天前的 .cmd 与 Chrome profile
+npm run clean:tmp                                  # 清 data/tmp 里 7 天前的 .cmd、Chrome profile 与 pty-probe 的依赖
 ```
 
 ## 文档

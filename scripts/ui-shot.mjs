@@ -137,6 +137,7 @@ const probe = `(() => {
     counts[k] = document.querySelectorAll('.line-' + k).length
   }
   return {
+    title: document.title,
     innerWidth: window.innerWidth,
     innerHeight: window.innerHeight,
     scrollWidth: document.documentElement.scrollWidth,

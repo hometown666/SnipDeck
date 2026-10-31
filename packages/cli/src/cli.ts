@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -292,6 +293,53 @@ async function main(): Promise<void> {
       break
     }
 
+    // 看原文：注释、字段顺序、折叠块都在。列表里的 `snip list` 只给摘要，
+    // 想看一条片段到底写了什么，以前只能去翻文件。
+    case 'cat': {
+      const id = positional[0]
+      if (!id) {
+        console.error('usage: snip cat <id>')
+        process.exitCode = 2
+        break
+      }
+      const snippet = store.get(id)
+      if (!snippet) {
+        console.error(`没有这个片段: ${id}`)
+        process.exitCode = 1
+        break
+      }
+      process.stdout.write(readFileSync(snippet.file, 'utf8'))
+      break
+    }
+
+    // 改原文：交给 $VISUAL / $EDITOR，都没有就 notepad（Windows）/ vi。
+    // 用 shell 是因为 `code -w`、`subl -n -w` 这类带参数的编辑器很常见。
+    case 'edit': {
+      const id = positional[0]
+      if (!id) {
+        console.error('usage: snip edit <id>   （用 $VISUAL / $EDITOR 打开，缺省 notepad）')
+        process.exitCode = 2
+        break
+      }
+      const snippet = store.get(id)
+      if (!snippet) {
+        console.error(`没有这个片段: ${id}`)
+        process.exitCode = 1
+        break
+      }
+      const fallback = process.platform === 'win32' ? 'notepad' : 'vi'
+      const editor = process.env.VISUAL || process.env.EDITOR || fallback
+      console.error(`editing ${snippet.file}`)
+      const r = spawnSync(`${editor} "${snippet.file}"`, { stdio: 'inherit', shell: true })
+      if (r.error) {
+        console.error(`打不开编辑器（${editor}）：${r.error.message}`)
+        process.exitCode = 1
+      } else if (r.status !== 0) {
+        process.exitCode = r.status ?? 1
+      }
+      break
+    }
+
     case 'reindex': {
       store.reindex()
       console.log(`reindexed: ${store.list().length} snippets, ${store.errors().length} quarantined`)
@@ -315,7 +363,7 @@ async function main(): Promise<void> {
     default:
       console.log(
         [
-          'snip list | search <q> | run <id> [--var k=v | --k=v ...] [--yes] | hosts | status | reindex',
+          'snip list | search <q> | cat <id> | edit <id> | run <id> [--var k=v | --k=v ...] [--yes] | hosts | status | reindex',
           'snip runs [n] | runs <runId>',
           'snip import-history [--from ps|bash|file:<path>] [--limit 100] [--group 历史导入] [--shell cmd|powershell] [--write] [--force]',
         ].join('\n'),
