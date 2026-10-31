@@ -1,0 +1,18 @@
+id: zz-ui-editor-mvwktgze
+title: UI 编辑器自检
+group: 状态
+tags:
+  - selfcheck
+vars:
+  n:
+    prompt: 编号
+    default: 1
+    choices:
+      - 1
+      - 2
+      - 3
+steps:
+  - do: run
+    cmd: echo probe {{n}}
+  - do: sleep
+    ms: 300

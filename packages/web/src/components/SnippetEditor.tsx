@@ -8,6 +8,7 @@ import {
   type SnippetStep,
   type SnippetVarSpec,
 } from '../api'
+import { CommandBuilder } from './CommandBuilder'
 import { Modal } from './Modal'
 
 /**
@@ -730,13 +731,7 @@ export function SnippetEditor({
                     </button>
                   </div>
                   {s.do === 'run' && (
-                    <textarea
-                      className="mono"
-                      rows={2}
-                      value={s.cmd}
-                      placeholder="call C:\ahk_trigger\ahk.bat shell shell#{{n}} …"
-                      onChange={(e) => patchStep(i, { cmd: e.target.value })}
-                    />
+                    <CommandBuilder value={s.cmd} onChange={(cmd) => patchStep(i, { cmd })} />
                   )}
                   {s.do === 'sleep' && (
                     <div className="editor-row tight">

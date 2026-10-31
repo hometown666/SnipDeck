@@ -209,8 +209,69 @@ try {
     check('底部按钮在视野内（sticky）', geo.actionsVisible === true)
   }
 
+  // 结构化命令：动作选择驱动字段显隐，预览行必须跟着变
+  const builderInit = await evalJs(`(() => {
+    const b = document.querySelector('.cmd-builder')
+    if (!b) return { has: false }
+    return {
+      has: true,
+      action: b.querySelector('select')?.value,
+      inputs: b.querySelectorAll('input:not([type=checkbox])').length,
+      preview: b.querySelector('.cmd-preview')?.textContent ?? '',
+    }
+  })()`)
+  check('run 步骤有结构化命令区', builderInit?.has === true, JSON.stringify(builderInit))
+  check('非桥命令默认落在「自定义」', builderInit?.action === 'custom', JSON.stringify(builderInit))
+
+  const pickAction = (action) => `(() => {
+    const s = document.querySelector('.cmd-builder select')
+    if (!s) return 'no-select'
+    s.value = ${JSON.stringify(action)}
+    s.dispatchEvent(new Event('change', { bubbles: true }))
+    return 'ok'
+  })()`
+
+  await evalJs(pickAction('lnk'))
+  await sleep(300)
+  const afterLnk = await evalJs(`(() => {
+    const b = document.querySelector('.cmd-builder')
+    return { inputs: b.querySelectorAll('input:not([type=checkbox])').length, preview: b.querySelector('.cmd-preview').textContent }
+  })()`)
+  check('选「打开快捷方式」只出现一个值输入框', afterLnk?.inputs === 1, JSON.stringify(afterLnk))
+  check('预览生成 ahk.bat lnk', String(afterLnk?.preview).includes('ahk.bat lnk'), afterLnk?.preview)
+
+  await evalJs(pickAction('status'))
+  await sleep(300)
+  const afterStatus = await evalJs(`(() => {
+    const b = document.querySelector('.cmd-builder')
+    return { inputs: b.querySelectorAll('input:not([type=checkbox])').length, preview: b.querySelector('.cmd-preview').textContent }
+  })()`)
+  check('选「刷新状态」不给任何输入框', afterStatus?.inputs === 0, JSON.stringify(afterStatus))
+  check('预览就是 ahk.bat status', String(afterStatus?.preview).trim().endsWith('ahk.bat status'), afterStatus?.preview)
+
+  await evalJs(pickAction('click'))
+  await sleep(300)
+  const afterClick = await evalJs(`(() => {
+    const b = document.querySelector('.cmd-builder')
+    return { inputs: b.querySelectorAll('input:not([type=checkbox])').length, preview: b.querySelector('.cmd-preview').textContent }
+  })()`)
+  check('选「点一下」要槽位 + x + y 三个框', afterClick?.inputs === 3, JSON.stringify(afterClick))
+  check('预览带 click 与坐标', String(afterClick?.preview).includes('ahk.bat click'), afterClick?.preview)
+
+  // 回到自定义，把探针片段还原成 echo（后面保存/读回用的是这条）
+  await evalJs(pickAction('custom'))
+  await sleep(300)
+  await evalJs(`(() => {
+    const t = document.querySelector('.cmd-builder textarea')
+    if (!t) return 'no-textarea'
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(t, 'echo probe {{n}}')
+    t.dispatchEvent(new Event('input', { bubbles: true }))
+    return 'ok'
+  })()`)
+
   // 滚到顶再量一次：底部按钮不该被滚走
-  await evalJs(`(() => { const m = document.querySelector('.modal.editor'); if (m) m.scrollTop = 0; return 'ok' })()`)
+  await evalJs(`(() => { const m = document.querySelector('.modal.editor .modal-scroll') || document.querySelector('.modal.editor'); if (m) m.scrollTop = 0; return 'ok' })()`)
   await sleep(300)
   const stickyAtTop = await evalJs(`(() => {
     const m = document.querySelector('.modal.editor')

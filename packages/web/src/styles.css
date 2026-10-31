@@ -1655,3 +1655,71 @@ body {
 .host-form .mini-check {
   margin-top: 10px;
 }
+
+/* ——— 片段编辑器 · 结构化命令（§39） ———
+   命令不再是自由文本框：先选动作，再填这个动作真正需要的字段。
+   预览行常显，否则「表单里填的」和「真正写进 YAML 的」会脱节。 */
+.cmd-builder {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px 10px;
+  background: var(--bg);
+  margin-top: 6px;
+}
+
+.cmd-builder .field {
+  margin-top: 6px;
+}
+
+.cmd-builder .mini-check {
+  margin-top: 8px;
+}
+
+.cmd-preview {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.warn-note {
+  color: var(--amber);
+}
+
+/* ——— 片段编辑器 · 结构化命令（§39） ———
+   命令不再是自由文本框：先选动作，再填这个动作真正需要的字段。
+   预览行常显，否则「表单里填的」和「真正写进 YAML 的」会脱节。 */
+.cmd-builder {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px 10px;
+  background: var(--bg);
+  margin-top: 6px;
+}
+
+.cmd-builder .field {
+  margin-top: 6px;
+}
+
+.cmd-builder .mini-check {
+  margin-top: 8px;
+}
+
+.cmd-preview {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.warn-note {
+  color: var(--amber);
+}
