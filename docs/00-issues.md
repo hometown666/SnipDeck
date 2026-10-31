@@ -14,7 +14,7 @@
 
 > 编号约定：从这里起统一用 `ISSUE-xxx`，不再分「BUG」与「缺口」两套号。理由——两者的共同点是**计划承诺了、当前做不到**，区别只在来源：bug 是写错了，缺口是没写完。分两套号会让「哪些还没补」散在两处。原 BUG-001 沿用 ISSUE-001。
 >
-> **队列约定（2026-10-29 起）**：issue **只往队尾追加**，编号永不复用、不重排、不插队。新发现的 issue 接在当前最大号之后（下一个是 `ISSUE-027`）。修好的：标题行「**未修**」改「**已修 · YYYY-MM-DD**」，「状态」行写明改了什么、哪个测试兜住；**现场记录原样保留不删**——它同时是回归用例的说明书。修到一半的写「**修中**」。issue 与其修复计划成对出现：正文在 §0.2/§0.3，计划在 §0.4。
+> **队列约定（2026-10-29 起）**：issue **只往队尾追加**，编号永不复用、不重排、不插队。新发现的 issue 接在当前最大号之后（下一个是 `ISSUE-029`）。修好的：标题行「**未修**」改「**已修 · YYYY-MM-DD**」，「状态」行写明改了什么、哪个测试兜住；**现场记录原样保留不删**——它同时是回归用例的说明书。修到一半的写「**修中**」。issue 与其修复计划成对出现：正文在 §0.2/§0.3，计划在 §0.4。
 
 **状态**：**已修 · 2026-10-29**。守卫改为按路径分流——`/api/*` 仍需 Bearer，其余一律放行；`notFound` 对「带扩展名但文件不存在」返回 404 文本（`/favicon.ico` 不再被 SPA 回退成 HTML）。冒烟补 5 条（远端 `GET /` → 200 HTML、远端 `/assets/*.js` → 200、`/favicon.ico` → 404 非 HTML、`/some/spa/route` → 200 HTML、静态放行未顺带放行 `/api`），共 33 项。另用 `SNIPDECK_HOST=100.99.202.54 SNIP_TOKEN=…` 起了个 7879 临时实例，从 Tailscale 地址实测：`/` → 200 `text/html` 885B、无 token 打 `/api/snippets` → 401、带 token → 16 条列表、`/favicon.ico` → 404 `text/plain`。以下为原始现场记录，保留作回归说明书。
 
@@ -935,3 +935,93 @@ FST_ERR_CTP_EMPTY_JSON_BODY: Body cannot be empty when content-type is set to 'a
 **为什么值得记**：这不是「测试脚本的小毛病」。**「用子串找唯一标识」在标识之间存在前缀关系时必然出错**，而错的方向是「操作了另一个对象」——在删除、执行这类动作上，这是最坏的一种错。同一条规矩在业务代码里也成立：`MacroPanel` 用 `key={id}` 渲染、后端用 Map 查 id，都没这个问题；但任何将来「按 id 在列表里找一条」的新代码都该用等值而不是包含。
 
 **关联**：`scripts/ui-editor.mjs`、`docs/04-phases.md` §33。
+
+---
+
+#### ISSUE-027：队列回归在冷启动后误报「没有串行」（低，测试脚本）—— **已修 · 2026-10-31**
+
+**现场**：`npm test` 里 `test:queue` 挂了：
+`✗ 两条并发只用了 4167ms（单条 2574ms）→ 队列没有串行`。
+但紧接着单独连跑两次，`4180ms / 4170ms`，且第二次命令 **实际排队 2085ms** —— 串行是好的。
+
+**原因**：判据是 `total >= single * 1.7`，而 `single` 是**第一次**调桥的耗时。
+第一次要走「起 cmd → 起 PowerShell → 写文件」的冷路径，比稳态慢 400~600ms：
+
+| | 单条 | 两条串行 | 比值 | 判定 |
+|---|---|---|---|---|
+| 冷启动那次 | 2574ms | 4167ms | 1.62 | ✗ 误报 |
+| 稳态 | 2082ms | 4173ms | 2.00 | ✓ |
+
+**修复**：测量前先空跑一次丢掉（`await once()`），基准取稳态。
+
+**教训**：**用「第一次执行」当性能基准，量的往往是初始化开销，不是被测行为。**
+这类误报最坏的地方不是浪费一次重跑，而是让人开始不信这条测试——而它守的正是
+「`command.txt` 单车道」这条最不能破的不变式。
+
+**关联**：`packages/drivers/scripts/test-queue.mts`、§35。
+
+---
+
+#### ISSUE-028：`Test-Path -LiteralPath ''` 抛异常，把整个 `ahk_cmd.ps1` 打死（中）—— **已修 · 2026-10-31**
+
+**现场**：`lnk:cursor` 这种跟 `AHK_DIR` 毫无关系的子命令，一调用就报
+`无法将参数绑定到参数"LiteralPath"，因为该参数为空字符串`，脚本当场退出、`command.txt` 没写。
+
+**原因**：脱敏时把 `$DefaultAhkDir` 改成 `''`，而 `Resolve-Dir` 里是
+`if (Test-Path -LiteralPath $DefaultPath)`。**空字符串不是返回 `false`，是参数绑定异常**，
+在 `$ErrorActionPreference = 'Stop'` 下直接中止整个脚本。所以失败点看着像 `lnk` 的问题，
+实际是同一行里为 `script` 准备的 `AHK_DIR` 解析先炸了。
+
+**修复**：`if ($DefaultPath -and (Test-Path -LiteralPath $DefaultPath))` 短路。
+
+**教训**：PowerShell 里**「空值」和「无效值」不是一回事**。`Test-Path` / `Join-Path` /
+`Get-ChildItem -LiteralPath` 这类强制参数遇到 `''` 是**抛错**，不是返回空。
+凡是「可选默认值」进这类参数，都要先判空。同类错误在 `Join-Path $progDir $name` 上也会犯，
+所以那里也补了「拼出来的路径不存在就提前报错」。
+
+**关联**：`bridge/ahk_cmd.ps1` 的 `Resolve-Dir`、`bridge/README.md` 的已知边界、§35.4。
+
+---
+
+#### ISSUE-027：队列回归在冷启动后误报「没有串行」（低，测试脚本）—— **已修 · 2026-10-31**
+
+**现场**：`npm test` 里 `test:queue` 挂了：
+`✗ 两条并发只用了 4167ms（单条 2574ms）→ 队列没有串行`。
+但紧接着单独连跑两次，`4180ms / 4170ms`，且第二次命令 **实际排队 2085ms** —— 串行是好的。
+
+**原因**：判据是 `total >= single * 1.7`，而 `single` 是**第一次**调桥的耗时。
+第一次要走「起 cmd → 起 PowerShell → 写文件」的冷路径，比稳态慢 400~600ms：
+
+| | 单条 | 两条串行 | 比值 | 判定 |
+|---|---|---|---|---|
+| 冷启动那次 | 2574ms | 4167ms | 1.62 | ✗ 误报 |
+| 稳态 | 2082ms | 4173ms | 2.00 | ✓ |
+
+**修复**：测量前先空跑一次丢掉（`await once()`），基准取稳态。
+
+**教训**：**用「第一次执行」当性能基准，量的往往是初始化开销，不是被测行为。**
+这类误报最坏的地方不是浪费一次重跑，而是让人开始不信这条测试——而它守的正是
+「`command.txt` 单车道」这条最不能破的不变式。
+
+**关联**：`packages/drivers/scripts/test-queue.mts`、§35。
+
+---
+
+#### ISSUE-028：`Test-Path -LiteralPath ''` 抛异常，把整个 `ahk_cmd.ps1` 打死（中）—— **已修 · 2026-10-31**
+
+**现场**：`lnk:cursor` 这种跟 `AHK_DIR` 毫无关系的子命令，一调用就报
+`无法将参数绑定到参数"LiteralPath"，因为该参数为空字符串`，脚本当场退出、`command.txt` 没写。
+
+**原因**：脱敏时把 `$DefaultAhkDir` 改成 `''`，而 `Resolve-Dir` 里是
+`if (Test-Path -LiteralPath $DefaultPath)`。**空字符串不是返回 `false`，是参数绑定异常**，
+在 `$ErrorActionPreference = 'Stop'` 下直接中止整个脚本。所以失败点看着像 `lnk` 的问题，
+实际是同一行里为 `script` 准备的 `AHK_DIR` 解析先炸了。
+
+**修复**：`if ($DefaultPath -and (Test-Path -LiteralPath $DefaultPath))` 短路。
+
+**教训**：PowerShell 里**「空值」和「无效值」不是一回事**。`Test-Path` / `Join-Path` /
+`Get-ChildItem -LiteralPath` 这类强制参数遇到 `''` 是**抛错**，不是返回空。
+凡是「可选默认值」进这类参数，都要先判空。同类错误在 `Join-Path $progDir $name` 上也会犯，
+所以那里也补了「拼出来的路径不存在就提前报错」。
+
+**关联**：`bridge/ahk_cmd.ps1` 的 `Resolve-Dir`、`bridge/README.md` 的已知边界、§35.4。
