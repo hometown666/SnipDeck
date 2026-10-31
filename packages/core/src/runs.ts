@@ -83,6 +83,17 @@ export class RunLog {
     }
   }
 
+  /**
+   * 网页上改完保留策略后调它。0 表示「用默认」，与 settings.json 的语义一致。
+   * 只影响下一次 `prune()`，不会回头删已经写好的档案。
+   */
+  setLimits(limits: { ttlDays?: number; maxFiles?: number }): void {
+    const next = { ...this.opts }
+    if (limits.ttlDays && limits.ttlDays > 0) next.ttlDays = limits.ttlDays
+    if (limits.maxFiles && limits.maxFiles > 0) next.maxFiles = limits.maxFiles
+    this.opts = next
+  }
+
   /** 新 run 的写句柄。落盘失败只 warn，绝不让排障功能反过来搞挂执行 */
   begin(meta: RunMeta, redact: string[] = []): RunWriter {
     return new RunWriter(this.dir, meta, redact)
@@ -157,8 +168,7 @@ export class RunLog {
   }
 
   /** 只留最近 `maxFiles` 个、且不超过 `ttlDays`；启动时调一次 */
-  prune(): number {
-    const maxFiles = this.opts.maxFiles ?? 500
+  prune(): number {    const maxFiles = this.opts.maxFiles ?? 500
     const ttlMs = (this.opts.ttlDays ?? 30) * 24 * 60 * 60 * 1000
     const now = Date.now()
     const files = this.files()

@@ -95,6 +95,8 @@ async function waitForCdp() {
 let ws
 let send
 let evalJs
+// 失败中途也要能清掉探针目标（finally 里用）
+let hostProbe = null
 try {
   const targets = await waitForCdp()
   const page = targets.find((t) => t.type === 'page')
@@ -220,9 +222,11 @@ try {
   await sleep(2400)
   await evalJs(openSettings)
   await sleep(500)
-  const persisted = await evalJs(
-    `[...document.querySelectorAll('.env-section input')].map((i) => i.value).join('|')`,
-  )
+  const persisted = await evalJs(`(() => {
+    // 只取「桥的目录」那一段：现在设置弹窗里还有目标与档案两块，全量取 input 会串味
+    const sec = [...document.querySelectorAll('.env-section')].find((s) => s.querySelector('h4')?.textContent.includes('桥的目录'))
+    return [...sec.querySelectorAll('input')].map((i) => i.value).join('|')
+  })()`)
   check('重载后输入框仍是保存的值', persisted === `${probeDir}|${probeDir}`, persisted)
 
   // 5) 清空 = 回默认
@@ -241,6 +245,147 @@ try {
   const afterClear = JSON.parse((await apiCall('GET', '/api/settings')).body)
   check('清空也落盘了', afterClear.progDir === '' && afterClear.ahkDir === '', JSON.stringify(afterClear))
 
+  // 5.5 运行档案保留策略
+  const setRuns = (ttl, max) => `(() => {
+    const sec = [...document.querySelectorAll('.env-section')].find((s) => s.querySelector('h4')?.textContent.includes('运行档案'))
+    if (!sec) return 'no-section'
+    const inputs = [...sec.querySelectorAll('input')]
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const set = (el, v) => { setter.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })) }
+    set(inputs[0], ${JSON.stringify(ttl)})
+    set(inputs[1], ${JSON.stringify(max)})
+    ;[...sec.querySelectorAll('.env-actions .btn')].find((b) => b.textContent.trim() === '保存')?.click()
+    return 'ok'
+  })()`
+
+  const hasRuns = await evalJs(
+    `[...document.querySelectorAll('.env-section')].some((s) => s.querySelector('h4')?.textContent.includes('运行档案'))`,
+  )
+  check('有「运行档案」区块', hasRuns === true)
+  await evalJs(setRuns('7', '100'))
+  await sleep(900)
+  const runsAfter = JSON.parse((await apiCall('GET', '/api/settings')).body)
+  check(
+    '档案策略保存到服务端',
+    runsAfter.runs?.ttlDays === 7 && runsAfter.runs?.maxFiles === 100 && runsAfter.runs?.isDefault === false,
+    JSON.stringify(runsAfter.runs),
+  )
+  const runsNote = await evalJs(`(() => {
+    const sec = [...document.querySelectorAll('.env-section')].find((s) => s.querySelector('h4')?.textContent.includes('运行档案'))
+    return sec?.querySelector('.field-note')?.textContent ?? ''
+  })()`)
+  check('生效行显示 7 天 / 100 份', runsNote.includes('7 天') && runsNote.includes('100'), runsNote)
+
+  // 恢复默认
+  await evalJs(`(() => {
+    const sec = [...document.querySelectorAll('.env-section')].find((s) => s.querySelector('h4')?.textContent.includes('运行档案'))
+    ;[...sec.querySelectorAll('.env-actions .btn')].find((b) => b.textContent.includes('恢复默认'))?.click()
+    return 'ok'
+  })()`)
+  await sleep(900)
+  const runsReset = JSON.parse((await apiCall('GET', '/api/settings')).body)
+  check('恢复默认后回到 30 天 / 500 份', runsReset.runs?.isDefault === true, JSON.stringify(runsReset.runs))
+
+  // 6) 目标（hosts.yaml）：新增 → 改名 → 删除，全在弹窗里完成
+  const rows0 = await evalJs(`(() => {
+    const rows = [...document.querySelectorAll('.host-row')]
+    return {
+      count: rows.length,
+      names: rows.map((r) => r.querySelector('.host-name')?.textContent ?? ''),
+      hasDefault: rows.some((r) => r.querySelector('.host-tag.is-default')),
+    }
+  })()`)
+  check('目标列表渲染出已有条目', rows0?.count >= 3, JSON.stringify(rows0))
+  check('默认目标有标记', rows0?.hasDefault === true)
+
+  const hostName = `zz-ui-host-${Date.now().toString(36)}`
+  hostProbe = hostName
+
+  // 新增
+  await evalJs(`[...document.querySelectorAll('.hosts-section .env-actions .btn')].find((b) => b.textContent.includes('新增目标'))?.click()`)
+  await sleep(300)
+  const formOpen = await evalJs(`!!document.querySelector('.host-form')`)
+  check('新增目标展开表单', formOpen === true)
+  // 表单态截一张：字段是否挤、下拉有没有被裁，只能看图
+  await evalJs(`document.querySelector('.host-form')?.scrollIntoView({ block: 'center' })`)
+  await sleep(250)
+  const formShot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
+  writeFileSync(out.replace('.png', '-hostform.png'), Buffer.from(formShot.result.data, 'base64'))
+
+  await evalJs(`(() => {
+    const inputs = [...document.querySelectorAll('.host-form input')]
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const set = (el, v) => { setter.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })) }
+    // 顺序：名字 / bridge / timeout
+    set(inputs[0], ${JSON.stringify(hostName)})
+    set(inputs[1], ${JSON.stringify(probeDir)})
+    return inputs.length
+  })()`)
+  await evalJs(`[...document.querySelectorAll('.host-form .env-actions .btn')].find((b) => b.textContent.includes('新建目标'))?.click()`)
+  await sleep(1200)
+  const afterCreate = await evalJs(`(() => ({
+    names: [...document.querySelectorAll('.host-name')].map((n) => n.textContent),
+    err: document.querySelector('.hosts-section .form-error')?.textContent ?? '',
+  }))()`)
+  check('新目标出现在列表里', afterCreate?.names?.includes(hostName), JSON.stringify(afterCreate))
+  check('新增没有报错', afterCreate?.err === '', afterCreate?.err)
+
+  const hostsAfterCreate = JSON.parse((await apiCall('GET', '/api/hosts/detail')).body)
+  check(
+    'API 读回同一份 hosts.yaml',
+    hostsAfterCreate.targets.some((t) => t.name === hostName && t.bridge === probeDir),
+    JSON.stringify(hostsAfterCreate.targets?.map((t) => t.name)),
+  )
+
+  // 改名
+  await evalJs(`(() => {
+    const row = [...document.querySelectorAll('.host-row')].find((r) => r.querySelector('.host-name')?.textContent === ${JSON.stringify(hostName)})
+    row?.querySelectorAll('.host-acts .btn')[0]?.click()
+    return 'ok'
+  })()`)
+  await sleep(400)
+  const renamedTo = `${hostName}b`
+  await evalJs(`(() => {
+    const el = document.querySelector('.host-form input')
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    setter.call(el, ${JSON.stringify(renamedTo)})
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    return el.value
+  })()`)
+  await evalJs(`[...document.querySelectorAll('.host-form .env-actions .btn')].find((b) => b.textContent.includes('保存目标'))?.click()`)
+  await sleep(1200)
+  const afterRename = await evalJs(`[...document.querySelectorAll('.host-name')].map((n) => n.textContent)`)
+  check('改名后旧名消失、新名在', afterRename?.includes(renamedTo) && !afterRename?.includes(hostName), JSON.stringify(afterRename))
+
+  // 删除要连点两次
+  await evalJs(`(() => {
+    const row = [...document.querySelectorAll('.host-row')].find((r) => r.querySelector('.host-name')?.textContent === ${JSON.stringify(renamedTo)})
+    row?.querySelectorAll('.host-acts .btn')[1]?.click()
+    return 'ok'
+  })()`)
+  await sleep(300)
+  // 点完要等一次 re-render 再读文案：React 不会同步改 DOM
+  const delFirst = await evalJs(`(() => {
+    const row = [...document.querySelectorAll('.host-row')].find((r) => r.querySelector('.host-name')?.textContent === ${JSON.stringify(renamedTo)})
+    return row?.querySelectorAll('.host-acts .btn')[1]?.textContent ?? ''
+  })()`)
+  check('删除第一次只换文案', String(delFirst).includes('确认删除'), String(delFirst))
+  await evalJs(`(() => {
+    const row = [...document.querySelectorAll('.host-row')].find((r) => r.querySelector('.host-name')?.textContent === ${JSON.stringify(renamedTo)})
+    row?.querySelectorAll('.host-acts .btn')[1]?.click()
+    return 'ok'
+  })()`)
+  await sleep(1200)
+  const afterDelete = await evalJs(`[...document.querySelectorAll('.host-name')].map((n) => n.textContent)`)
+  check('删除后从列表消失', !afterDelete?.includes(renamedTo), JSON.stringify(afterDelete))
+
+  const hostsEnd = JSON.parse((await apiCall('GET', '/api/hosts/detail')).body)
+  check(
+    '删除也落盘了',
+    !hostsEnd.targets.some((t) => t.name === renamedTo || t.name === hostName),
+    JSON.stringify(hostsEnd.targets?.map((t) => t.name)),
+  )
+
   console.log('')
   if (problems.length > 0) {
     console.error(`✗ ${problems.length} 项未通过：${problems.join(' / ')}`)
@@ -255,6 +400,10 @@ try {
     // ignore
   }
   chrome.kill()
-  // 收尾：不留配置，免得后面跑别的回归时带着探针路径
+  // 收尾：不留配置/探针目标，免得后面跑别的回归时带着它们
   await apiCall('DELETE', '/api/settings')
+  if (hostProbe) {
+    await apiCall('DELETE', `/api/hosts/${encodeURIComponent(hostProbe)}`)
+    await apiCall('DELETE', `/api/hosts/${encodeURIComponent(hostProbe + 'b')}`)
+  }
 }

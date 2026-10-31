@@ -1,5 +1,7 @@
 /** 访问 token 弹窗：粘贴一次存 localStorage，只在这台设备生效 */
 import { BridgeEnvSection } from './BridgeEnvSection'
+import { HostsSection } from './HostsSection'
+import { RunsSection } from './RunsSection'
 
 export function SettingsModal({
   tokenInput,
@@ -10,6 +12,7 @@ export function SettingsModal({
   onClear,
   onSave,
   onClose,
+  onHostsChanged,
 }: {
   tokenInput: string
   tokenSet: boolean
@@ -20,6 +23,8 @@ export function SettingsModal({
   onClear: () => void
   onSave: () => void
   onClose: () => void
+  /** 目标增删改之后让外层重拉一次（目标选择器要跟着变） */
+  onHostsChanged?: () => void
 }) {
   return (
     <div className="modal-mask" onClick={onClose}>
@@ -48,6 +53,8 @@ export function SettingsModal({
           </button>
         </div>
         {showEnv && <BridgeEnvSection />}
+        {showEnv && <HostsSection onChanged={onHostsChanged} />}
+        {showEnv && <RunsSection />}
       </div>
     </div>
   )

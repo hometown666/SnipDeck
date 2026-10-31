@@ -7,6 +7,9 @@
  *   2. *-profile/       各 UI 回归脚本的 Chrome --user-data-dir，各十几 MB；
  *   3. pty-probe/node_modules/  P5 前置验证时装过 node-pty，64MB。
  *      同目录的 probe*.cjs 与 RESULT.md 是文档引用的复现材料，**不删**。
+ *   4. *.png             各次 UI 回归的截图，一张几百 KB，累积起来比 profile 还多。
+ *      截图只在排查当下有用，过期就没价值了——按天删，`--all` 也**不**碰它
+ *      （有人会把某张留着当对比图）。
  * 服务端的 prune 只管 data/runs，管不到这里；实测堆到 174MB。
  *
  * 用法：
@@ -38,7 +41,8 @@ if (!existsSync(tmpDir)) {
 }
 
 const cutoff = Date.now() - days * 24 * 60 * 60 * 1000
-const isTarget = (name) => name.endsWith('-profile') || /^run-.+\.cmd$/.test(name)
+const isTarget = (name) =>
+  name.endsWith('-profile') || /^run-.+\.cmd$/.test(name) || /\.png$/i.test(name)
 
 let freed = 0
 let count = 0

@@ -24,9 +24,16 @@ export type BridgeSettings = {
   progDir: string
   /** 放 .ahk 的目录。空 = 不注入，script 子命令会明确报错 */
   ahkDir: string
+  /** 运行档案保留天数（默认 30）；0 = 用默认 */
+  runsTtlDays: number
+  /** 运行档案保留份数（默认 500）；0 = 用默认 */
+  runsMaxFiles: number
 }
 
-export const EMPTY_SETTINGS: BridgeSettings = { progDir: '', ahkDir: '' }
+export const EMPTY_SETTINGS: BridgeSettings = { progDir: '', ahkDir: '', runsTtlDays: 0, runsMaxFiles: 0 }
+
+/** 档案保留的默认值：与 RunLog 的缺省保持一致 */
+export const RUNS_DEFAULTS = { ttlDays: 30, maxFiles: 500 }
 
 export class SettingsError extends Error {
   problems: string[]
@@ -44,7 +51,13 @@ export function loadSettings(file: string): BridgeSettings {
   if (!existsSync(file)) return { ...EMPTY_SETTINGS }
   try {
     const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
-    return { progDir: str(raw.progDir), ahkDir: str(raw.ahkDir) }
+    const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+    return {
+      progDir: str(raw.progDir),
+      ahkDir: str(raw.ahkDir),
+      runsTtlDays: num(raw.runsTtlDays),
+      runsMaxFiles: num(raw.runsMaxFiles),
+    }
   } catch {
     return { ...EMPTY_SETTINGS }
   }
@@ -77,12 +90,26 @@ export function validateSettings(next: BridgeSettings): string[] {
   }
   check(next.progDir, 'PROG_DIR')
   check(next.ahkDir, 'AHK_DIR')
+
+  // 0 = 用默认。给个上下界，免得填 0 天把档案全删了或者填 999999 份等于没上限
+  const int = (v: number, label: string, min: number, max: number) => {
+    if (v === 0) return
+    if (!Number.isInteger(v) || v < min || v > max)
+      problems.push(`${label} 是 ${min}–${max} 的整数（0 = 用默认）：${String(v)}`)
+  }
+  int(next.runsTtlDays, '档案保留天数', 1, 3650)
+  int(next.runsMaxFiles, '档案保留份数', 10, 100000)
   return problems
 }
 
 /** 写：原子（同目录 .tmp → rename），避免半份 JSON 被下一次 load 读到 */
 export function saveSettings(file: string, input: BridgeSettings): BridgeSettings {
-  const next: BridgeSettings = { progDir: str(input.progDir), ahkDir: str(input.ahkDir) }
+  const next: BridgeSettings = {
+    progDir: str(input.progDir),
+    ahkDir: str(input.ahkDir),
+    runsTtlDays: Number.isFinite(input.runsTtlDays) ? input.runsTtlDays : 0,
+    runsMaxFiles: Number.isFinite(input.runsMaxFiles) ? input.runsMaxFiles : 0,
+  }
   const problems = validateSettings(next)
   if (problems.length > 0) throw new SettingsError(problems)
 

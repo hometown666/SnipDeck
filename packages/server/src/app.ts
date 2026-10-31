@@ -9,15 +9,21 @@ import {
   SnippetWriteError,
   deleteSnippet,
   draftOf,
+  deleteHost,
   groupOf,
+  hostMtime,
+  HostWriteError,
   loadHosts,
   newRunId,
   renderTolerant,
   resolveTarget,
   resolveVars,
   runSnippet,
+  saveHost,
   saveSnippet,
   saveSnippetRaw,
+  usableNames,
+  type HostDraft,
   type Hosts,
   type HostTarget,
   type RunEvent,
@@ -33,6 +39,7 @@ import { isKnownShell, knownShells, SessionManager } from './sessions'
 import {
   countLnks,
   EMPTY_SETTINGS,
+  RUNS_DEFAULTS,
   envOf,
   loadSettings,
   saveSettings,
@@ -126,7 +133,8 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
   const app = Fastify({ logger: opts.logger ?? true })
   const store = new SnippetStore(snippetsDir)
   store.watchDir()
-  const hosts = loadHosts(hostsFile)
+  // let 而不是 const：网页上改完目标后直接换掉这一份，省得每条请求都读盘
+  let hosts = loadHosts(hostsFile)
   // 启动清一次：只按时间不够，调试期一天能跑出上百条，500 个文件上限兜底
   const runs = new RunLog(runsDir, { maxFiles: 500, ttlDays: 30 })
   runs.prune()
@@ -327,13 +335,95 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
     }
   })
 
-  app.get('/api/hosts', async () =>
-    Object.entries(hosts).map(([name, t]) => ({
-      name,
-      driver: t.driver,
-      reserved: !!t.reserved,
-      default: !!t.default,
-    })),
+  // ——— 目标（hosts.yaml）———
+  //
+  // 之前只能手改文件。加一台机器要开编辑器、查字段名、还要小心 default 排他；
+  // 而 bridge 路径本身就是机器级配置，和 PROG_DIR / AHK_DIR 同一类。
+  const hostRow = ([name, t]: [string, HostTarget]) => ({
+    name,
+    driver: t.driver,
+    bridge: typeof t.bridge === 'string' ? t.bridge : '',
+    shell: typeof t.shell === 'string' ? t.shell : '',
+    timeout: typeof t.timeout === 'number' ? t.timeout : null,
+    reserved: !!t.reserved,
+    default: !!t.default,
+  })
+
+  app.get('/api/hosts', async () => Object.entries(hosts).map(hostRow))
+
+  // 编辑器用：多带一个 mtimeMs，PUT / DELETE 要原样带回来（否则会静默覆盖别人的改动）
+  app.get('/api/hosts/detail', async () => ({
+    targets: Object.entries(hosts).map(hostRow),
+    mtimeMs: hostMtime(hostsFile),
+  }))
+
+  const hostError = (reply: FastifyReply, e: unknown) => {
+    if (e instanceof HostWriteError) {
+      const code = e.kind === 'invalid' ? 400 : e.kind === 'missing' ? 404 : 409
+      return reply.code(code).send({ error: e.message, problems: e.problems })
+    }
+    throw e
+  }
+
+  app.post<{ Body: HostDraft }>('/api/hosts', async (req, reply) => {
+    try {
+      const r = saveHost(hostsFile, req.body)
+      hosts = r.updated
+      return reply.code(201).send({ ok: true, name: r.name, mtimeMs: r.mtimeMs })
+    } catch (e) {
+      return hostError(reply, e)
+    }
+  })
+
+  app.put<{ Params: { name: string }; Body: HostDraft & { mtimeMs?: number } }>(
+    '/api/hosts/:name',
+    async (req, reply) => {
+      const body = (req.body ?? {}) as HostDraft & { mtimeMs?: number }
+      try {
+        const r = saveHost(hostsFile, body, {
+          previousName: req.params.name,
+          expectedMtimeMs: body.mtimeMs,
+        })
+        hosts = r.updated
+        return { ok: true, name: r.name, renamed: r.renamed, mtimeMs: r.mtimeMs }
+      } catch (e) {
+        return hostError(reply, e)
+      }
+    },
+  )
+
+  app.delete<{ Params: { name: string }; Querystring: { mtimeMs?: string } }>(
+    '/api/hosts/:name',
+    async (req, reply) => {
+      const name = req.params.name
+      if (!hosts[name]) return reply.code(404).send({ error: `目标不存在：${name}` })
+
+      // 有片段指着它就拦住：删完那些片段要到运行时才报「目标未知」
+      const used = store
+        .list()
+        .filter((s) => s.target === name)
+        .map((s) => s.id)
+      if (used.length > 0) {
+        return reply.code(409).send({
+          error: `还有 ${used.length} 条片段用着这个目标：${used.slice(0, 5).join(', ')}${used.length > 5 ? ' 等' : ''}`,
+        })
+      }
+      // 删掉最后一个可用目标，resolveTarget 就抛「no host target configured」，health 直接 500
+      if (!hosts[name]!.reserved && usableNames(hosts).length <= 1) {
+        return reply.code(409).send({ error: '这是最后一个可用目标，删了服务就没有默认目标了' })
+      }
+
+      const q = Number(req.query.mtimeMs)
+      try {
+        const r = deleteHost(hostsFile, name, {
+          expectedMtimeMs: Number.isFinite(q) && q > 0 ? q : undefined,
+        })
+        hosts = r.updated
+        return { ok: true, name, mtimeMs: r.mtimeMs }
+      } catch (e) {
+        return hostError(reply, e)
+      }
+    },
   )
 
   // ——— 桥的两条目录（PROG_DIR / AHK_DIR）———
@@ -352,6 +442,12 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
       ahkBatExists: existsSync(resolve(bridgeRoot, 'ahk.bat')),
       // 设了 progDir 才有意义；null = 没设或读不到
       lnkCount: countLnks(bridgeSettings.progDir),
+      // 0 = 用默认值，这里换算成「实际生效」的数字给界面看
+      runs: {
+        ttlDays: bridgeSettings.runsTtlDays || RUNS_DEFAULTS.ttlDays,
+        maxFiles: bridgeSettings.runsMaxFiles || RUNS_DEFAULTS.maxFiles,
+        isDefault: !bridgeSettings.runsTtlDays && !bridgeSettings.runsMaxFiles,
+      },
     }
   }
 
@@ -363,7 +459,17 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
       bridgeSettings = saveSettings(settingsFile, {
         progDir: typeof body.progDir === 'string' ? body.progDir : bridgeSettings.progDir,
         ahkDir: typeof body.ahkDir === 'string' ? body.ahkDir : bridgeSettings.ahkDir,
+        runsTtlDays:
+          typeof body.runsTtlDays === 'number' ? body.runsTtlDays : bridgeSettings.runsTtlDays,
+        runsMaxFiles:
+          typeof body.runsMaxFiles === 'number' ? body.runsMaxFiles : bridgeSettings.runsMaxFiles,
       })
+      // 立刻生效：先换限值再清一次，不然要等到下次重启才按新策略裁
+      runs.setLimits({
+        ttlDays: bridgeSettings.runsTtlDays,
+        maxFiles: bridgeSettings.runsMaxFiles,
+      })
+      runs.prune()
     } catch (e) {
       if (e instanceof SettingsError) {
         return reply.code(400).send({ error: e.message, problems: e.problems })
@@ -376,6 +482,7 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
   // 清空即「回到默认」，不给「删除配置」这类额外动作——空字符串本来就是合法状态
   app.delete('/api/settings', async () => {
     bridgeSettings = saveSettings(settingsFile, { ...EMPTY_SETTINGS })
+    runs.setLimits({ ttlDays: 0, maxFiles: 0 })
     return settingsView()
   })
 

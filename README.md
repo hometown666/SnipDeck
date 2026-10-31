@@ -21,6 +21,7 @@
 - **危险动作**：`danger: true` 的片段先确认，并可预览渲染后的最终命令行
 - **单车道队列**：`command.txt` 只能一条一条来，走桥的命令严格 FIFO，前端会显示排队时长
 - **网页里改片段**（P6）：顶栏 `＋` 新建（快捷键 `N`）、卡片右下角 `✎` 编辑（`E`）。两种模式——**表单**覆盖 vars / steps / meta 全字段（保存会重排 YAML），**原文**直接改 YAML 文本（逐字落盘，注释和排版都留住）。改 `id` 会自动搬文件；「另存副本」按 `<id>-copy` 新建；删除进 `snippets/.trash/`。编辑期间文件被别人改过会 409，不静默覆盖
+- **⚙ 里配目标**：`hosts.yaml` 的增 / 改 / 删也在设置里——名字、driver、bridge、shell、timeout、默认。改名即换键，`default` 排他；有片段引用或只剩最后一个可用目标时拒绝删除
 - **⚙ 里配桥**：`PROG_DIR`（找 `.lnk`）与 `AHK_DIR`（跑 `.ahk`）直接在设置弹窗里改，落 `data/settings.json`，服务下一条命令就注入给桥。留空 = 用桥自身的默认（桌面）
 - **CLI**：任意 SSH 终端（Termius、手机、iPad）里 `snip run <id>`；`snip cat <id>` 看原文，`snip edit <id>` 用 `$EDITOR` 直接改
 - **执行目标**：`win-desktop`（exec 驱动，经 `ahk.bat` 驱动桌面 GUI）
@@ -234,7 +235,7 @@ data/
 ## 测试
 
 ```bash
-npm test     # typecheck + lint + ps1 编码 + bridge 护栏 + 队列串行 + 命令保真度 + 环境注入 + 搜索 + expect + 导入 + 会话 + API 冒烟（冒烟 116 项）
+npm test     # typecheck + lint + ps1 编码 + bridge 护栏 + 队列串行 + 命令保真度 + 环境注入 + 搜索 + expect + 导入 + 会话 + API 冒烟（冒烟 139 项）
 ```
 
 单项：
@@ -246,7 +247,7 @@ npm run test:env    --workspace @snipdeck/drivers  # PROG_DIR / AHK_DIR 真的�
 npm run test:search --workspace @snipdeck/core     # 中文子串 / 多词 AND / 大小写与空白（14 项）
 npm run test:expect --workspace @snipdeck/core     # expect 三源 / 编码 / 正则预算 / 轮询等待（40 项）
 npm run test:import --workspace @snipdeck/core     # 历史清洗 / 残句识别 / 危险标记 / 不覆盖（60 项）
-npm run smoke       --workspace @snipdeck/server   # 打真路由：鉴权 / 404 / 脱敏 / CRUD / 设置 / 真 SSE 执行（116 项）
+npm run smoke       --workspace @snipdeck/server   # 打真路由：鉴权 / 404 / 脱敏 / CRUD / 设置 / 目标 / 真 SSE 执行（139 项）
 # CI 上没有 listener：SNIPDECK_SMOKE_BRIDGE=<不存在的目录> 会走「无桥模式」，跳过 5 条实跑，其余 111 条照跑
 npm run test:session --workspace @snipdeck/server   # 终端会话：PTY / resize / 删除真杀进程 / WS 鉴权
 npm run ui:shot -- http://127.0.0.1:7878/ 390 844 data/tmp/ui.png   # 移动端仿真截图 + 布局测量
@@ -256,7 +257,7 @@ npm run ui:queue                                   # 顶栏「排队 N」徽标�
 npm run ui:multi                                   # 多目标：目标选择器 + 并列面板（需服务在线）
 npm run ui:history                                 # 运行历史：列表 + 抽屉回放（需服务在线）
 npm run ui:editor                                 # 片段编辑器：开/改/存/原文/副本/删（26 项，需服务在线）
-npm run ui:settings                              # 设置页：桥的两条目录改/存/刷新后还在/清空（14 项，需服务在线）
+npm run ui:settings                              # 设置页：桥目录 / 运行档案 / 目标增删改（28 项，需服务在线）
 npm run test:session-reap                          # 会话回收，**真 60 秒**两条路径（约 70s，不进 npm test）
 npm run lint                                       # eslint：只拦错，不排格式
 npm run check:ps1                                  # .ps1 必须 UTF-8 with BOM 且语法可解析（PS 5.1 的坑）

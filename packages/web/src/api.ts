@@ -25,6 +25,29 @@ export type HostView = {
   default: boolean
 }
 
+/** 目标编辑用：比 HostView 多 bridge / shell / timeout，列表页不需要这些 */
+export type HostDetailView = HostView & {
+  bridge: string
+  shell: string
+  timeout: number | null
+}
+
+export type HostsDetail = {
+  targets: HostDetailView[]
+  /** hosts.yaml 的 mtime：PUT / DELETE 带回去，对不上就 409 */
+  mtimeMs: number
+}
+
+export type HostInput = {
+  name: string
+  driver: 'exec' | 'local' | 'ssh'
+  bridge?: string
+  shell?: string
+  timeout?: number
+  default?: boolean
+  mtimeMs?: number
+}
+
 /** 桥的两条目录配置：PROG_DIR 找 .lnk，AHK_DIR 跑 .ahk */
 export type BridgeSettingsView = {
   progDir: string
@@ -35,6 +58,8 @@ export type BridgeSettingsView = {
   ahkBatExists: boolean
   /** 只数一层；null = 没设或读不到 */
   lnkCount: number | null
+  /** 运行档案保留策略（0 在服务端表示「用默认」，这里给的是生效值） */
+  runs: { ttlDays: number; maxFiles: number; isDefault: boolean }
 }
 
 /** 片段的一个步骤：与 core 的 Step 联合类型对齐（编辑器要把它完整读回来再写回去） */
@@ -285,9 +310,29 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   snippets: () => req<SnippetView[]>('/api/snippets'),
   hosts: () => req<HostView[]>('/api/hosts'),
+  hostsDetail: () => req<HostsDetail>('/api/hosts/detail'),
+  createHost: (input: HostInput) =>
+    req<{ ok: boolean; name: string; mtimeMs: number }>('/api/hosts', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateHost: (name: string, input: HostInput) =>
+    req<{ ok: boolean; name: string; renamed: boolean; mtimeMs: number }>(
+      `/api/hosts/${encodeURIComponent(name)}`,
+      { method: 'PUT', body: JSON.stringify(input) },
+    ),
+  deleteHost: (name: string, mtimeMs?: number) =>
+    req<{ ok: boolean; name: string; mtimeMs: number }>(
+      `/api/hosts/${encodeURIComponent(name)}${mtimeMs ? `?mtimeMs=${mtimeMs}` : ''}`,
+      { method: 'DELETE' },
+    ),
   settings: () => req<BridgeSettingsView>('/api/settings'),
-  saveSettings: (input: { progDir: string; ahkDir: string }) =>
-    req<BridgeSettingsView>('/api/settings', { method: 'PUT', body: JSON.stringify(input) }),
+  saveSettings: (input: {
+    progDir?: string
+    ahkDir?: string
+    runsTtlDays?: number
+    runsMaxFiles?: number
+  }) => req<BridgeSettingsView>('/api/settings', { method: 'PUT', body: JSON.stringify(input) }),
   clearSettings: () => req<BridgeSettingsView>('/api/settings', { method: 'DELETE' }),
   health: () => req<HealthView>('/api/health'),
   /** 编辑用：完整字段 + mtime（列表里的 SnippetView 只有摘要） */

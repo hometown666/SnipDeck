@@ -53,7 +53,8 @@ issue 侧：`ISSUE-001 ~ 028` **全部已修**（001–008 于 10-29，009–016
 | ~~上 HTTPS 前先改鉴权~~ | ✅ **已改 · 2026-10-31**（方案 D：有 token 一律校验，删掉 loopback 豁免） | §12-1、ISSUE-023 |
 | ~~CI 不跑 smoke~~ | ✅ **已接 · 2026-10-31**（`SNIPDECK_SMOKE_BRIDGE` 注入点 → 无桥模式跑 111 条；同时补 `build:web`、`check:bridge`、`test:env`）。`test:session` 仍不进 CI | `.github/workflows/ci.yml`、§16、§36 |
 | 桥的两条目录上网页（`PROG_DIR` / `AHK_DIR`） | ✅ **已做 · 2026-10-31**（⚙ → 桥的目录，落 `data/settings.json`，注入子进程 env） | §36、§14 |
-| `hosts.yaml` 目标管理（增删目标 / bridge 路径 / 超时） | 未做 —— 加一台机器仍要手改 YAML；`bridge` 路径也是机器级配置 | §36.6 |
+| `hosts.yaml` 目标管理（增删目标 / bridge 路径 / 超时） | ✅ **已做 · 2026-10-31**（⚙ → 目标；两道删除守卫；`default` 排他） | §37、§14 |
+| 运行档案保留策略可配（天数 / 份数） | ✅ **已做 · 2026-10-31**（⚙ → 运行档案；保存后立刻 `prune()` 一次） | §37.3、§14 |
 
 ---
 

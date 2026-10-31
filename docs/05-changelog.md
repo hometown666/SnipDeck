@@ -213,3 +213,12 @@
   - **冒烟进 CI**（老缺口）：加 `SNIPDECK_SMOKE_BRIDGE` 注入点，CI 指向不存在的目录走「无桥模式」——跳过 5 条实跑，其余 **111 条**照打真路由。CI 同时加 `build:web`（否则静态壳那组会被跳过）与 `check:bridge` / `test:env`。
   - `doctor` 多两行：`PROG_DIR` / `AHK_DIR` 的当前值，目录不存在直接 ✗ 并给修复路径。
   - 冒烟 104 → **116**；主包 gzip 60.04 → **61.81KB**。
+- **v3.5**（2026-10-31，目标上网页 · 档案保留可配）：
+  - **`hosts.yaml` 能在网页里改了**：⚙ → 目标，增 / 改 / 删执行目标（名字、driver、bridge、shell、timeout、默认）。新增 `GET /api/hosts/detail` + `POST/PUT/DELETE /api/hosts`。
+  - **写入层刻意更轻**：原地改 YAML 文档（注释与顺序留住），覆盖前 `.bak`，写完再解析一遍自检——**hosts.yaml 坏掉等于服务起不来**。`mtimeMs` 冲突检测与片段同款。
+  - **`default` 排他**、**`reserved` 由 driver 推出来**（只有 `exec` 真能跑，`local`/`ssh` 是占位）。
+  - **两道删除守卫**：有片段引用 → 409 并点名；只剩一个可用目标 → 409（否则 `resolveTarget` 抛错、health 直接 500）。
+  - **运行档案保留可配**：天数 / 份数进设置，`0`/留空 = 默认 30 天 / 500 份；保存后**立刻 `prune()` 一次**。`RunLog.setLimits()`。
+  - 界面用**内联展开**而不是第二层弹窗（手机上双遮罩很难用）；删除连点两次，与片段一致。
+  - `clean:tmp` 现在也按天清 `data/tmp/*.png`（`--all` 不碰截图）。
+  - 冒烟 116 → **139**；`ui:settings` 14 → **28 项**（桥目录 + 档案 + 目标），1366 与真 390 双过；主包 gzip 61.81 → **63.54KB**。

@@ -617,6 +617,7 @@ export function App() {
           }}
           onSave={() => void saveToken()}
           onClose={() => setShowSettings(false)}
+          onHostsChanged={() => void refresh()}
         />
       )}
 

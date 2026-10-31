@@ -56,9 +56,13 @@
 | PUT | `/api/snippets/:id` | 同上 + `mtimeMs?` | 200 `{ok,id,relPath,renamed,mtimeMs}`；`body.id` 与 URL 不同即视作**改名**（文件跟着搬）；`mtimeMs` 与磁盘不符 409（不覆盖别人的改动） |
 | DELETE | `/api/snippets/:id` | — | 200 `{ok,id,backup}`；删除前先把副本放进 `snippets/.trash/<id>-<时间戳>.yaml.txt` |
 | POST | `/api/snippets/:id/preview` | `{vars}` | `{cmds,pending,missing,redacted}`；secret 渲染为 `***`；未填变量保留 `{{x}}` |
-| GET | `/api/hosts` | — | `{name,driver,reserved,default}[]` |
-| GET | `/api/settings` | — | `{progDir,ahkDir,injected,bridgeRoot,ahkBatExists,lnkCount}`；`progDir/ahkDir` 是**用户填的**，`injected` 是真正注入给 `ahk.bat` 的环境变量（空值不出现） |
-| PUT | `/api/settings` | `{progDir?,ahkDir?}` | 同 GET；路径非绝对 / 不存在 / 不是目录 → 400（`problems[]`）；**校验失败不落盘** |
+| GET | `/api/hosts` | — | `{name,driver,bridge,shell,timeout,reserved,default}[]`（`bridge` 等是后加的字段，老调用只读前四个） |
+| GET | `/api/hosts/detail` | — | `{targets, mtimeMs}`；编辑器用，`mtimeMs` 要原样带回给 PUT / DELETE |
+| POST | `/api/hosts` | `{name,driver,bridge?,shell?,timeout?,default?}` | 201 `{ok,name,mtimeMs}`；名字不合法 / exec 缺 bridge / timeout 越界 → 400（`problems[]`）；重名 → 409 |
+| PUT | `/api/hosts/:name` | 同上 + `mtimeMs?` | 200 `{ok,name,renamed,mtimeMs}`；`body.name` 与 URL 不同即**改名**；`mtimeMs` 对不上 409 且不碰文件 |
+| DELETE | `/api/hosts/:name` | `?mtimeMs=` | 200 `{ok,name,mtimeMs}`；**被片段引用 → 409**（点名前几个片段）；**最后一个可用目标 → 409**；不存在 404 |
+| GET | `/api/settings` | — | `{progDir,ahkDir,injected,bridgeRoot,ahkBatExists,lnkCount,runs}`；`progDir/ahkDir` 是**用户填的**，`injected` 是真正注入给 `ahk.bat` 的环境变量（空值不出现）；`runs` 是换算后的生效值 `{ttlDays,maxFiles,isDefault}` |
+| PUT | `/api/settings` | `{progDir?,ahkDir?,runsTtlDays?,runsMaxFiles?}` | 同 GET；路径非绝对 / 不存在 / 不是目录 → 400（`problems[]`）；天数/份数越界 → 400；**校验失败不落盘**。字段是**部分更新**：没带的保持原值。改完档案策略会立刻 `prune()` 一次 |
 | DELETE | `/api/settings` | — | 清空，回默认（等价 PUT 两个空串） |
 | POST | `/api/run` | `{id,vars?,targets?,target?,confirm?}` | `text/event-stream`；每条事件带 `target` + `targetIndex`；首条 `start` 额外带 `runId` |
 | GET | `/api/runs` | `?limit=20&snippet=<id>` | `RunListItem[]`（倒序）；每项是档案首行 `meta` + 末行 `summary` 的合并，带 `ok/durationMs/panes/eventCount` |
@@ -72,6 +76,14 @@
 - 改完**下一条命令**就生效，不用重启服务，也不用改桥；
 - 空字符串 = **不注入**，`ahk_cmd.ps1` 回落到它自己的默认值（`PROG_DIR` 默认桌面，`AHK_DIR` 没有默认）；
 - 落盘在 `data/settings.json`（gitignore），因为这是机器级配置，同一仓库在两台机器上本来就不同。
+
+**目标的写入语义（hosts.yaml）**
+
+- **原地改文档**（`loadYamlDoc` → `setIn` → `saveYamlDoc`），不整份 `stringify`：别人写在文件里的注释与顺序能留住。
+- **`default` 排他**：设一台，其它台的 `default` 被摘掉。
+- **`reserved` 由 `driver` 推出来**：只有 `exec` 能真跑，`local` / `ssh` 是 P5.3 之后留的占位，写入时自动补 `reserved: true`。
+- 覆盖前留 `hosts.yaml.bak`；写完再解析一遍自检——hosts.yaml 坏掉等于服务起不来，比一条片段坏严重得多。
+- 删除有两道守卫：**有片段指着它**（`snippet.target`）就 409，否则那些片段要到运行时才报「目标未知」；**只剩一个可用目标**也 409，否则 `resolveTarget` 抛错、`/api/health` 直接 500。
 
 `/api/run` 的目标入参优先级：`targets[]` > `target` > 片段 `target` > hosts 的 `default`。`targets[]` 里**同一目标可以重复**（同目标多开），最多 8 个。
 
@@ -150,8 +162,9 @@
 | Lint | `npm run lint`（eslint 9 flat config，`eslint.config.mjs`）。**只拦错不排格式**——没有 prettier，免得一次把 5000 行重排成没法 review 的 diff |
 | 环境自检 | `npm run doctor` —— **只读**：Node 版本、AutoHotkey v2、`C:\ahk_trigger` 与三个桥文件（连行数一起报，能看出是不是空文件）、launchers、`.env`、token 与 HOST 的组合、服务是否在跑、桥是否 up；另比对**仓库这份 vs 已装那份**（不一致给 `~ 版本` 提示，不判错）。每条失败都带一条修复命令；有 ✗ 时退出码 1 |
 | 装桥 | `npm run install:bridge` —— 把 `bridge/` 的三个文件拷到 `C:\ahk_trigger`（`-Target <目录>` 可换）。**注意「装在哪」不等于「运行的是哪份」**：自启指向别处时，装完还得改自启。目标已存在且内容不同**先备份成 `*.bak.<时间戳>` 再覆盖**（本机那份可能被改过）；内容相同跳过；`-DryRun` 只看，`-Start` 装完启动 listener。**不装 AutoHotkey**，没装只打印 winget 命令 |
+| 目标管理 | 网页 ⚙ → **目标**：增 / 改 / 删 `hosts.yaml` 里的执行目标（名字、driver、bridge、shell、timeout、默认）。改名即换键；`default` 排他；有片段引用或只剩最后一个可用目标时拒绝删除（409） |
 | 桥的目录 | 网页 ⚙ → **桥的目录**（`GET/PUT/DELETE /api/settings`）：`PROG_DIR`（找 `.lnk`）与 `AHK_DIR`（跑 `.ahk`）。落 `data/settings.json`（已 gitignore），服务 spawn `ahk.bat` 时注入成子进程环境变量，**改完下一条命令生效**；留空 = 不注入，桥用自身默认（`PROG_DIR` 桌面 / `AHK_DIR` 无默认）。服务端拒收非绝对路径与不存在的目录——`ahk_cmd.ps1` 在目录缺失时会**静默回落**，「设了但没生效」比报错难查得多 |
-| 清临时产物 | `npm run clean:tmp` —— 删 `data/tmp` 下 7 天前的 `run-*.cmd`、`*-profile`（CDP 的 Chrome profile，每个十几 MB）与 `pty-probe/node_modules`（P5 前置验证装过的 node-pty，64MB；同目录的 `probe*.cjs` / `RESULT.md` 是文档引用的复现材料，不删）；`--dry` 只看，`--days N` 改期限，`--all` 忽略年龄全删 profile。UI 脚本启动时也会各自判断 profile 超过 1 天没用就重建（`scripts/lib/profile.mjs`） |
+| 清临时产物 | `npm run clean:tmp` —— 删 `data/tmp` 下 7 天前的 `run-*.cmd`、`*-profile`（CDP 的 Chrome profile，每个十几 MB）与 `pty-probe/node_modules`（P5 前置验证装过的 node-pty，64MB；同目录的 `probe*.cjs` / `RESULT.md` 是文档引用的复现材料，不删）与 `*.png`（UI 回归截图，按天删，`--all` 不碰）；`--dry` 只看，`--days N` 改期限，`--all` 忽略年龄全删 profile。UI 脚本启动时也会各自判断 profile 超过 1 天没用就重建（`scripts/lib/profile.mjs`） |
 | CI | `.github/workflows/ci.yml`（windows-latest）：`npm ci` → typecheck → lint → check:ps1 → check:bridge → queue / cmd / env / search / expect / import → build:web → smoke。**冒烟进 CI 用的是「无桥模式」**：`SNIPDECK_SMOKE_BRIDGE` 指一个不存在的目录，`bridgeUp=false` 那条分支会跳过 5 条实跑用例，其余照常打真路由（111 条）。三个 `ui:*` 仍不进 CI——它们要真 Chrome + 在线服务 + listener |
 | 测试 | `npm test` = typecheck + lint + `check:ps1` + `check:bridge`(11) + `test:queue` + `test:cmd`(8) + `test:env`(5) + `test:search`(14) + `test:expect`(40) + `test:import`(60) + `test:session` + smoke（**116 项**）。`check:bridge` 是 `bridge/` 的静态护栏：不能含私人路径、不能带回 `cursor:*`、`ahk_cmd.ps1` 必须有 BOM。`check:ps1` 扫全仓 `.ps1` 验 UTF-8 BOM 与语法（ISSUE-017 的防回归）。冒烟 fixture 落系统 temp（`mkdtemp`），跑完自动删；**清理失败只 warn，不改退出码**（ISSUE-004）。静态壳免 token 的 5 条用例在 `packages/web/dist` 不存在时整组跳过并打 `~`（先 `npm run build:web`）。`test:env` 钉的是「网页上改的 PROG_DIR / AHK_DIR 真的到达子进程」：注入、不注入、同一实例改完立刻生效、以及注入后 `SystemRoot` 这类基础环境没被 env 覆盖挤掉。UI 侧另有 `npm run ui:multi` / `ui:history` / `ui:editor` / `ui:settings`（需服务在线，不进 `npm test`） |
 
