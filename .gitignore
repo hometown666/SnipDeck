@@ -21,6 +21,9 @@ data/tmp/
 data/runs/
 # 删除片段时的副本（CRUD 的回收站，扩展名是 .yaml.txt，不会被当成片段加载）
 data/snippets/.trash/
+# 回归脚本自建的临时片段（npm run ui:editor）。脚本正常结束会删掉，
+# 中途失败就会留下，别让它混进仓库当真人片段
+data/snippets/**/zz-ui-editor-*.yaml
 
 # ============ dependencies and build ============
 node_modules/
