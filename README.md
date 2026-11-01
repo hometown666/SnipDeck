@@ -257,8 +257,8 @@ npm run ui:shot -- http://127.0.0.1:7878/ 390 844 data/tmp/ui.png   # 移动端�
 npm run ui:queue                                   # 顶栏「排队 N」徽标可见性（需服务 + 桥都在线）
 npm run ui:multi                                   # 多目标：目标选择器 + 并列面板（需服务在线）
 npm run ui:history                                 # 运行历史：列表 + 抽屉回放（需服务在线）
-npm run ui:editor                                 # 片段编辑器：开/改/存/原文/副本/删（26 项，需服务在线）
-npm run ui:settings                              # 设置页：桥目录 / 运行档案 / 目标增删改（28 项，需服务在线）
+npm run ui:editor                                  # 片段编辑器：开/改/存/原文/副本/删（32 项，需服务在线）
+npm run ui:settings                                # 设置页：桥目录 / 运行档案 / 目标增删改（30 项，需服务在线）
 npm run test:session-reap                          # 会话回收，**真 60 秒**两条路径（约 70s，不进 npm test）
 npm run lint                                       # eslint：只拦错，不排格式
 npm run check:ps1                                  # .ps1 必须 UTF-8 with BOM 且语法可解析（PS 5.1 的坑）
@@ -274,7 +274,7 @@ npm run clean:tmp                                  # 清 data/tmp 里 7 天前�
 - [docs/01-design.md](./docs/01-design.md) — 架构、驱动能力边界、数据模型、运行时（§1–§8）
 - [docs/02-roadmap.md](./docs/02-roadmap.md) — 路线图与验收、风险、安全模型、待定项（§9–§12）
 - [docs/03-reference.md](./docs/03-reference.md) — 迁移清单、接口契约、字段参考、部署（§13–§16）
-- [docs/04-phases.md](./docs/04-phases.md) — 各期实施记录与取舍（§17–§34）
+- [docs/04-phases.md](./docs/04-phases.md) — 各期实施记录与取舍（§17–§39）
 - [docs/06-terminal.md](./docs/06-terminal.md) — 网页终端的设计与验收（§23–§29）
-- [docs/00-issues.md](./docs/00-issues.md) — ISSUE-001~026 现场记录与修复（§0.2–§0.9）
+- [docs/00-issues.md](./docs/00-issues.md) — ISSUE-001~028 现场记录与修复（§0.2–§0.9）
 - [docs/05-changelog.md](./docs/05-changelog.md) — 变更日志
