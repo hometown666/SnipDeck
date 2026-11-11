@@ -5,6 +5,9 @@
 SSH-USAGE.md
 # personal reference screenshots (content folded into docs/03-reference.md §13)
 Screenshot_*.jpg
+# docs/ — entire folder not tracked (plan is SnipDeck-PLAN.md at repo root).
+# untracked via `git rm --cached -r docs/` (history preserved).
+docs/
 
 # ============ runtime data and secrets ============
 # keys / tokens, gitignored by default (PLAN 5.4)
@@ -13,6 +16,10 @@ data/secrets.yaml
 .env
 # 桥的两条目录配置（PROG_DIR / AHK_DIR）——每台机器不一样，网页上改的就是它
 data/settings.json
+# 程序发现的范围（only / extraRoots / include）——每台机器装的软件不一样
+data/programs.yaml
+# 便携 exe 的 .lnk 包装（服务端按需生成，可随时删；删了下次扫描会重建）
+data/program-links/
 # server logs (scripts/start-server.ps1)
 data/logs/
 # temp batch files run-<runId>.cmd
