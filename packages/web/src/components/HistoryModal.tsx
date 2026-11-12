@@ -21,37 +21,11 @@ export function HistoryModal({
   onClose: () => void
 }) {
   return (
-    <Modal className="history-" onClose={onClose}>
-        <h3>运行历史</h3>
-        <p className="modal-sub">
-          每次执行服务端都会落一份档案（<code>data/runs/&lt;runId&gt;.jsonl</code>）；断网、关页面之后也能回看。
-          secret 变量的值在档案里已抹成 <code>***</code>。
-        </p>
-        {error && <p className="form-error">{error}</p>}
-        {runs === null && !error && <p className="empty">读取中…</p>}
-        {runs?.length === 0 && <p className="empty">还没有运行记录</p>}
-        <div className="run-list">
-          {runs?.map((r) => (
-            <button
-              key={r.runId}
-              type="button"
-              className={`run-row${r.ok ? ' ok' : ' fail'}`}
-              onClick={() => onReplay(r.runId)}
-              disabled={replayId === r.runId}
-              title={`${r.runId}${r.vars && Object.keys(r.vars).length > 0 ? ` · ${Object.entries(r.vars).map(([k, v]) => `${k}=${v}`).join(' ')}` : ''}`}
-            >
-              <span className="run-when">{fmtWhen(r.startedAt)}</span>
-              <span className="run-id">{r.snippetId}</span>
-              <span className="run-meta">
-                {r.targets.length > 1 ? `${r.targets.length} 目标` : (r.targets[0] ?? '-')}
-                {' · '}
-                {fmtDur(r.durationMs)}
-              </span>
-              <span className={`run-state ${r.ok ? 'ok' : 'fail'}`}>{r.ok ? '✓' : '✗'}</span>
-            </button>
-          ))}
-        </div>
-        <div className="modal-actions">
+    <Modal
+      className="history"
+      onClose={onClose}
+      footer={
+        <>
           <span className="modal-hint">{runs ? `${runs.length} 条` : ''}</span>
           <button className="btn ghost" onClick={onClose}>
             关闭
@@ -59,7 +33,38 @@ export function HistoryModal({
           <button className="btn" onClick={onRefresh}>
             刷新
           </button>
-        </div>
+        </>
+      }
+    >
+      <h3>运行历史</h3>
+      <p className="modal-sub">
+        每次执行服务端都会落一份档案（<code>data/runs/&lt;runId&gt;.jsonl</code>）；断网、关页面之后也能回看。
+        secret 变量的值在档案里已抹成 <code>***</code>。
+      </p>
+      {error && <p className="form-error">{error}</p>}
+      {runs === null && !error && <p className="empty">读取中…</p>}
+      {runs?.length === 0 && <p className="empty">还没有运行记录</p>}
+      <div className="run-list">
+        {runs?.map((r) => (
+          <button
+            key={r.runId}
+            type="button"
+            className={`run-row${r.ok ? ' ok' : ' fail'}`}
+            onClick={() => onReplay(r.runId)}
+            disabled={replayId === r.runId}
+            title={`${r.runId}${r.vars && Object.keys(r.vars).length > 0 ? ` · ${Object.entries(r.vars).map(([k, v]) => `${k}=${v}`).join(' ')}` : ''}`}
+          >
+            <span className="run-when">{fmtWhen(r.startedAt)}</span>
+            <span className="run-id">{r.snippetId}</span>
+            <span className="run-meta">
+              {r.targets.length > 1 ? `${r.targets.length} 目标` : (r.targets[0] ?? '-')}
+              {' · '}
+              {fmtDur(r.durationMs)}
+            </span>
+            <span className={`run-state ${r.ok ? 'ok' : 'fail'}`}>{r.ok ? '✓' : '✗'}</span>
+          </button>
+        ))}
+      </div>
     </Modal>
   )
 }

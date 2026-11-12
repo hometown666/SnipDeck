@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import {
   ACTION_SPECS,
   EMPTY_DRAFT,
@@ -20,11 +20,19 @@ import {
 export function CommandBuilder({
   value,
   onChange,
+  slots = [],
+  programValues = [],
 }: {
   value: string
   onChange: (cmd: string) => void
+  /** 当前实例表的槽位，只给 `<datalist>` 做建议；不限制手输 */
+  slots?: string[]
+  /** 发现到的 .lnk 绝对路径，给「打开快捷方式」的输入框做建议 */
+  programValues?: string[]
 }) {
   const [draft, setDraft] = useState<AhkDraft>(() => parseAhkCommand(value))
+  const slotsId = useId()
+  const programsId = useId()
 
   // 外部把 cmd 换掉了（切步骤、从原文模式切回来）：重新解析
   useEffect(() => {
@@ -67,10 +75,19 @@ export function CommandBuilder({
             <span>槽位</span>
             <input
               value={draft.slot}
+              list={slots.length > 0 ? slotsId : undefined}
               placeholder="shell#1 / wechat#1"
+              title="可从当前实例表选，也可以手输变量"
               spellCheck={false}
               onChange={(e) => apply({ slot: e.target.value })}
             />
+            {slots.length > 0 && (
+              <datalist id={slotsId}>
+                {slots.map((slot) => (
+                  <option key={slot} value={slot} />
+                ))}
+              </datalist>
+            )}
           </label>
         )}
 
@@ -131,8 +148,16 @@ export function CommandBuilder({
               value={draft.value}
               placeholder={spec.valueHint}
               spellCheck={false}
+              list={draft.action === 'lnk' && programValues.length > 0 ? programsId : undefined}
               onChange={(e) => apply({ value: e.target.value })}
             />
+            {draft.action === 'lnk' && programValues.length > 0 && (
+              <datalist id={programsId}>
+                {programValues.map((p) => (
+                  <option key={p} value={p} />
+                ))}
+              </datalist>
+            )}
           </label>
         )
       )}
@@ -156,9 +181,13 @@ export function CommandBuilder({
 
       {/* 自定义模式下 textarea 本身就是最终命令，再显示一遍只是噪音 */}
       {draft.action !== 'custom' && (
-        <p className="cmd-preview mono" title="最终写进 YAML 的命令">
-          {buildAhkCommand(draft) || '（还没填完整）'}
-        </p>
+        <figure
+          className="ui-code ui-code--sm cmd-preview-code"
+          title="最终写进 YAML 的命令"
+        >
+          {/* pre 内不能有换行缩进：JSX 会把它原样保留成空白行 */}
+          <pre className="ui-code__pre"><code className="mono">{buildAhkCommand(draft) || '（还没填完整）'}</code></pre>
+        </figure>
       )}
       <p className="field-note">
         任何字段里都能写变量占位符，例如 <code>{'{{n}}'}</code>。

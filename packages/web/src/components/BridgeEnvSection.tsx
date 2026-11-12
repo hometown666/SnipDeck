@@ -83,7 +83,7 @@ export function BridgeEnvSection() {
         </span>
         <input
           value={progDir}
-          placeholder="留空 = 默认桌面"
+          placeholder="留空 = 不注入（桥用它自己的默认值）"
           spellCheck={false}
           onChange={(e) => {
             setProgDir(e.target.value)
@@ -94,7 +94,7 @@ export function BridgeEnvSection() {
       <p className="field-note">
         {injected.PROG_DIR
           ? `生效：${injected.PROG_DIR}${view?.lnkCount !== null ? `（${view?.lnkCount} 个 .lnk）` : '（读不到这个目录）'}`
-          : '生效：桌面（由 ahk_cmd.ps1 自己取，跟着系统重定向走）'}
+          : '生效：未注入 —— 桥回落到它自己脚本里的默认值，服务端看不到是哪个目录；程序列表要准就把它填死'}
       </p>
 
       <label className="field">

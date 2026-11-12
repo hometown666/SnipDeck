@@ -1,12 +1,19 @@
 import type { CSSProperties, RefObject } from 'react'
+import { Modal } from './Modal'
 import { fmtWhen, paneLabel, paneStatus } from '../lib/run-events'
 import type { Output } from '../types'
 
 /**
- * 运行抽屉：单目标时一块面板、多目标时按 `--cols` 并列（上限 3 列）。
+ * 运行结果弹窗（原「运行抽屉」）。
  *
+ * 2026-11-08 改版：以前是贴底固定的全宽抽屉（.drawer，无遮罩），
+ * 现在统一走项目的 Modal 外壳——有遮罩、点外部关闭、固定底栏，
+ * 桌面居中给日志更大视野，窄屏仍回到底部弹窗。
+ *
+ * 输出正文仍保持每块 pane 独立滚动：`.modal-scroll` 对 run-modal 不滚动，
+ * 由 .panes / .drawer-body 各自承担，多目标并列时才不会整块一起滚。
  * 正文默认 `white-space:pre` 不折行——宁可横向滚，也不让一行断成两截；
- * 长段落场景由头部的 `↩` 切到 pre-wrap。
+ * 长段落由底栏的「自动换行」切到 pre-wrap。
  */
 export function RunDrawer({
   output,
@@ -37,7 +44,38 @@ export function RunDrawer({
   const multi = panes.length > 1
 
   return (
-    <div className={`drawer ${drawerState}${multi ? ' multi' : ''}${wrap ? ' wrap' : ''}`}>
+    <Modal
+      className={`run-modal ${drawerState}${multi ? ' multi' : ''}${wrap ? ' wrap' : ''}`}
+      centered
+      onClose={onClose}
+      footer={
+        <>
+          <span className="run-modal__hint">Esc 或点击遮罩关闭</span>
+          <button
+            type="button"
+            className={`ui-btn ui-btn--ghost ui-btn--sm${wrap ? ' ui-btn--secondary' : ''}`}
+            onClick={onToggleWrap}
+            aria-pressed={wrap}
+            aria-label="自动换行"
+            title="自动换行（长段落用）"
+          >
+            ↩ 自动换行
+          </button>
+          <button
+            type="button"
+            className="ui-btn ui-btn--ghost ui-btn--sm"
+            onClick={onCopy}
+            aria-label="复制输出"
+            title="复制全部输出"
+          >
+            {copied ? '✓ 已复制' : '⧉ 复制输出'}
+          </button>
+          <button type="button" className="ui-btn ui-btn--primary ui-btn--sm" onClick={onClose}>
+            关闭
+          </button>
+        </>
+      }
+    >
       <div className="drawer-head">
         <span className="drawer-id">{output.id}</span>
         {output.replayed && output.replayedAt ? (
@@ -50,22 +88,6 @@ export function RunDrawer({
           {statusText}
         </span>
         {multi && <span className="drawer-count">{panes.length} 目标</span>}
-        <span className="drawer-tools">
-          <button
-            className={`icon-btn${wrap ? ' on' : ''}`}
-            onClick={onToggleWrap}
-            aria-label="自动换行"
-            title="自动换行（长段落用）"
-          >
-            ↩
-          </button>
-          <button className="icon-btn" onClick={onCopy} aria-label="复制输出" title="复制">
-            {copied ? '✓' : '⧉'}
-          </button>
-          <button className="icon-btn" onClick={onClose} aria-label="关闭" title="关闭（Esc）">
-            ×
-          </button>
-        </span>
       </div>
       <div
         className={`panes${multi ? ' multi' : ''}`}
@@ -102,6 +124,6 @@ export function RunDrawer({
           </section>
         ))}
       </div>
-    </div>
+    </Modal>
   )
 }

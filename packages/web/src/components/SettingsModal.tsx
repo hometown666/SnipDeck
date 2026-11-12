@@ -1,6 +1,7 @@
 /** 访问 token 弹窗：粘贴一次存 localStorage，只在这台设备生效 */
 import { BridgeEnvSection } from './BridgeEnvSection'
 import { HostsSection } from './HostsSection'
+import { ProgramsSection } from './ProgramsSection'
 import { RunsSection } from './RunsSection'
 import { Modal } from './Modal'
 
@@ -14,6 +15,7 @@ export function SettingsModal({
   onSave,
   onClose,
   onHostsChanged,
+  onProgramsChanged,
 }: {
   tokenInput: string
   tokenSet: boolean
@@ -26,9 +28,21 @@ export function SettingsModal({
   onClose: () => void
   /** 目标增删改之后让外层重拉一次（目标选择器要跟着变） */
   onHostsChanged?: () => void
+  /** 程序范围改了：外层把缓存的程序列表丢掉，下次打开表单重扫 */
+  onProgramsChanged?: () => void
 }) {
   return (
-    <Modal className="settings" onClose={onClose}>
+    <Modal
+      className="settings"
+      onClose={onClose}
+      // 各段自己带保存按钮（改了才生效），底栏只负责关窗：
+      // 手机上没有它就只能点遮罩，误触一次就白填
+      footer={
+        <button className="btn" onClick={onClose}>
+          完成
+        </button>
+      }
+    >
         <h3>访问 token</h3>
         <p className="modal-sub">
           服务端设了 <code>SNIP_TOKEN</code> 时，非本机访问需要它。只存在这台设备的 localStorage。
@@ -53,6 +67,7 @@ export function SettingsModal({
           </button>
         </div>
         {showEnv && <BridgeEnvSection />}
+        {showEnv && <ProgramsSection onChanged={onProgramsChanged} />}
         {showEnv && <HostsSection onChanged={onHostsChanged} />}
         {showEnv && <RunsSection />}
     </Modal>

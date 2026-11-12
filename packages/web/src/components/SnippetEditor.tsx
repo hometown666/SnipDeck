@@ -202,6 +202,8 @@ export function SnippetEditor({
   snippetId,
   hosts,
   groups,
+  slots,
+  programValues,
   onSaved,
   onClose,
 }: {
@@ -210,6 +212,10 @@ export function SnippetEditor({
   hosts: HostView[]
   /** 现有分组名，用作 datalist */
   groups: string[]
+  /** 当前实例表的槽位，给结构化命令的「槽位」输入做建议 */
+  slots: string[]
+  /** 发现到的 .lnk 绝对路径，给「打开快捷方式」做建议 */
+  programValues: string[]
   onSaved: (message: string) => void
   onClose: () => void
 }) {
@@ -448,19 +454,58 @@ export function SnippetEditor({
   }
 
   return (
-    <Modal className="editor" onClose={onClose}>
+    <Modal
+      className="editor"
+      onClose={onClose}
+      footer={
+        <>
+          {editing && (
+            <button
+              className={`ui-btn ${confirmDelete ? 'ui-btn--danger' : 'ui-btn--ghost'}`}
+              disabled={saving || loading}
+              onClick={() => (confirmDelete ? void remove() : setConfirmDelete(true))}
+              onBlur={() => setConfirmDelete(false)}
+            >
+              {confirmDelete ? '确认删除？' : '删除'}
+            </button>
+          )}
+          {editing && mode === 'form' && (
+            <button
+              className="ui-btn ui-btn--ghost"
+              disabled={saving || loading}
+              title={`另存为 ${form.id.trim()}-copy`}
+              onClick={() => void duplicate()}
+            >
+              另存副本
+            </button>
+          )}
+          {/* 左侧「删除 / 另存副本」与右侧「取消 / 保存」分开站 */}
+          <span className="spacer" />
+          <button className="ui-btn ui-btn--ghost" onClick={onClose}>
+            取消
+          </button>
+          <button
+            className="ui-btn ui-btn--primary"
+            disabled={saving || loading || !!loadError}
+            onClick={() => void save()}
+          >
+            {saving ? '保存中…' : '保存'}
+          </button>
+        </>
+      }
+    >
         <h3>{editing ? '编辑片段' : '新建片段'}</h3>
         <div className="editor-tabs">
           <button
             type="button"
-            className={`editor-tab${mode === 'form' ? ' on' : ''}`}
+            className={`ui-btn ui-btn--sm ${mode === 'form' ? 'ui-btn--primary' : 'ui-btn--ghost'}`}
             onClick={() => setMode('form')}
           >
             表单
           </button>
           <button
             type="button"
-            className={`editor-tab${mode === 'raw' ? ' on' : ''}`}
+            className={`ui-btn ui-btn--sm ${mode === 'raw' ? 'ui-btn--primary' : 'ui-btn--ghost'}`}
             disabled={!editing}
             title={editing ? '直接编辑 YAML 原文，保存时不重排' : '先保存一次才能看原文'}
             onClick={() => setMode('raw')}
@@ -477,12 +522,12 @@ export function SnippetEditor({
         </p>
 
         {loading ? (
-          <p className="empty">加载中…</p>
+          <div className="ui-empty"><p className="ui-empty__desc">加载中…</p></div>
         ) : loadError ? (
-          <p className="form-error">{loadError}</p>
+          <div className="ui-alert ui-alert--danger"><div className="ui-alert__body"><span className="ui-alert__title">{loadError}</span></div></div>
         ) : mode === 'raw' ? (
           rawLoading || raw === null ? (
-            <p className="empty">读取原文…</p>
+            <div className="ui-empty"><p className="ui-empty__desc">读取原文…</p></div>
           ) : (
             <div className="raw-wrap">
               {/* 行号列：与 textarea 共享 line-height，滚动时靠 onScroll 同步。
@@ -524,7 +569,7 @@ export function SnippetEditor({
                 <span>
                   id<em className="req"> *</em>
                 </span>
-                <input
+                <input className="ui-input"
                   ref={idRef}
                   value={form.id}
                   placeholder="例如 run-backtrans"
@@ -533,7 +578,7 @@ export function SnippetEditor({
               </label>
               <label className="field">
                 <span>标题</span>
-                <input
+                <input className="ui-input"
                   value={form.title}
                   placeholder="卡片上显示的名字"
                   onChange={(e) => patch({ title: e.target.value })}
@@ -541,7 +586,7 @@ export function SnippetEditor({
               </label>
               <label className="field">
                 <span>分组</span>
-                <input
+                <input className="ui-input"
                   value={form.group}
                   list="editor-groups"
                   placeholder="例如 状态（留空 = 未分组）"
@@ -555,7 +600,7 @@ export function SnippetEditor({
               </label>
               <label className="field">
                 <span>目标</span>
-                <select value={form.target} onChange={(e) => patch({ target: e.target.value })}>
+                <select className="ui-input" value={form.target} onChange={(e) => patch({ target: e.target.value })}>
                   <option value="">跟随默认目标</option>
                   {hosts.map((h) => (
                     <option key={h.name} value={h.name}>
@@ -567,7 +612,7 @@ export function SnippetEditor({
               </label>
               <label className="field">
                 <span>shell</span>
-                <select
+                <select className="ui-input"
                   value={form.shell}
                   onChange={(e) => patch({ shell: e.target.value as Form['shell'] })}
                 >
@@ -578,7 +623,7 @@ export function SnippetEditor({
               </label>
               <label className="field">
                 <span>标签</span>
-                <input
+                <input className="ui-input"
                   value={form.tags}
                   placeholder="逗号分隔，例如 shell, python"
                   onChange={(e) => patch({ tags: e.target.value })}
@@ -586,13 +631,14 @@ export function SnippetEditor({
               </label>
             </div>
 
-            <label className="check">
+            <label className="ui-checkbox">
               <input
                 type="checkbox"
                 checked={form.danger}
                 onChange={(e) => patch({ danger: e.target.checked })}
               />
-              <span>标记为 danger（执行前要二次确认）</span>
+              <span className="ui-checkbox__box" aria-hidden="true" />
+              <span className="ui-checkbox__label">标记为 danger（执行前要二次确认）</span>
             </label>
 
             <section className="editor-section">
@@ -600,7 +646,7 @@ export function SnippetEditor({
                 变量 <em>{form.vars.length}</em>
                 <button
                   type="button"
-                  className="btn tiny"
+                  className="ui-btn ui-btn--xs"
                   onClick={() =>
                     setForm((f) => ({
                       ...f,
@@ -626,37 +672,38 @@ export function SnippetEditor({
               {form.vars.map((v, i) => (
                 <div className="editor-row" key={i}>
                   <input
-                    className="mono"
+                    className="ui-input mono"
                     value={v.name}
                     placeholder="名字"
                     onChange={(e) => patchVar(i, { name: e.target.value })}
                   />
-                  <input
+                  <input className="ui-input"
                     value={v.prompt}
                     placeholder="提示文案"
                     onChange={(e) => patchVar(i, { prompt: e.target.value })}
                   />
-                  <input
+                  <input className="ui-input"
                     value={v.def}
                     placeholder="默认值"
                     onChange={(e) => patchVar(i, { def: e.target.value })}
                   />
-                  <input
+                  <input className="ui-input"
                     value={v.choices}
                     placeholder="选项（逗号分隔）"
                     onChange={(e) => patchVar(i, { choices: e.target.value })}
                   />
-                  <label className="mini-check" title="secret 变量的值不会回显，也不落运行档案">
+                  <label className="ui-checkbox mini" title="secret 变量的值不会回显，也不落运行档案">
                     <input
                       type="checkbox"
                       checked={v.secret}
                       onChange={(e) => patchVar(i, { secret: e.target.checked })}
                     />
-                    secret
+                    <span className="ui-checkbox__box" aria-hidden="true" />
+                    <span className="ui-checkbox__label">secret</span>
                   </label>
                   <button
                     type="button"
-                    className="icon-btn small"
+                    className="ui-btn ui-btn--ghost ui-btn--icon ui-btn--xs"
                     aria-label={`删除变量 ${v.name || i + 1}`}
                     onClick={() => setForm((f) => ({ ...f, vars: f.vars.filter((_, k) => k !== i) }))}
                   >
@@ -671,7 +718,7 @@ export function SnippetEditor({
                 步骤 <em>{form.steps.length}</em>
                 <button
                   type="button"
-                  className="btn tiny"
+                  className="ui-btn ui-btn--xs"
                   onClick={() => setForm((f) => ({ ...f, steps: [...f.steps, blankStep()] }))}
                 >
                   ＋ 步骤
@@ -681,7 +728,7 @@ export function SnippetEditor({
                 <div className={`editor-step${s.optional ? ' optional' : ''}`} key={i}>
                   <div className="editor-step-head">
                     <strong>#{i + 1}</strong>
-                    <select
+                    <select className="ui-input"
                       value={s.do}
                       onChange={(e) => patchStep(i, { do: e.target.value as Do })}
                     >
@@ -691,18 +738,19 @@ export function SnippetEditor({
                         </option>
                       ))}
                     </select>
-                    <label className="mini-check" title="失败也继续往下走">
+                    <label className="ui-checkbox mini" title="失败也继续往下走">
                       <input
                         type="checkbox"
                         checked={s.optional}
                         onChange={(e) => patchStep(i, { optional: e.target.checked })}
                       />
-                      可失败
+                      <span className="ui-checkbox__box" aria-hidden="true" />
+                      <span className="ui-checkbox__label">可失败</span>
                     </label>
                     <span className="spacer" />
                     <button
                       type="button"
-                      className="icon-btn small"
+                      className="ui-btn ui-btn--ghost ui-btn--icon ui-btn--xs"
                       aria-label="上移"
                       disabled={i === 0}
                       onClick={() => moveStep(i, -1)}
@@ -711,7 +759,7 @@ export function SnippetEditor({
                     </button>
                     <button
                       type="button"
-                      className="icon-btn small"
+                      className="ui-btn ui-btn--ghost ui-btn--icon ui-btn--xs"
                       aria-label="下移"
                       disabled={i === form.steps.length - 1}
                       onClick={() => moveStep(i, 1)}
@@ -720,7 +768,7 @@ export function SnippetEditor({
                     </button>
                     <button
                       type="button"
-                      className="icon-btn small"
+                      className="ui-btn ui-btn--ghost ui-btn--icon ui-btn--xs"
                       aria-label={`删除第 ${i + 1} 步`}
                       disabled={form.steps.length === 1}
                       onClick={() =>
@@ -731,11 +779,16 @@ export function SnippetEditor({
                     </button>
                   </div>
                   {s.do === 'run' && (
-                    <CommandBuilder value={s.cmd} onChange={(cmd) => patchStep(i, { cmd })} />
+                    <CommandBuilder
+                      value={s.cmd}
+                      onChange={(cmd) => patchStep(i, { cmd })}
+                      slots={slots}
+                      programValues={programValues}
+                    />
                   )}
                   {s.do === 'sleep' && (
                     <div className="editor-row tight">
-                      <input
+                      <input className="ui-input"
                         value={s.ms}
                         inputMode="numeric"
                         placeholder="毫秒，例如 1500"
@@ -746,7 +799,7 @@ export function SnippetEditor({
                   {s.do === 'expect' && (
                     <>
                       <textarea
-                        className="mono"
+                        className="ui-textarea mono"
                         rows={2}
                         value={s.match}
                         placeholder="正则正文（不含 /…/）"
@@ -755,13 +808,13 @@ export function SnippetEditor({
                       <div className="editor-row tight">
                         <input
                           value={s.flags}
-                          className="mono"
+                          className="ui-input mono"
                           placeholder="flags（i / m / s）"
                           onChange={(e) => patchStep(i, { flags: e.target.value })}
                         />
                         <input
                           value={s.from}
-                          className="mono"
+                          className="ui-input mono"
                           placeholder="from：last / all / file:C:\path"
                           onChange={(e) => patchStep(i, { from: e.target.value })}
                         />
@@ -770,7 +823,7 @@ export function SnippetEditor({
                   )}
                   {s.do !== 'sleep' && (
                     <div className="editor-row tight">
-                      <input
+                      <input className="ui-input"
                         value={s.timeout}
                         inputMode="numeric"
                         placeholder="timeout（秒，可空）"
@@ -787,7 +840,7 @@ export function SnippetEditor({
                 meta <em>{form.meta.length}</em>
                 <button
                   type="button"
-                  className="btn tiny"
+                  className="ui-btn ui-btn--xs"
                   onClick={() => setForm((f) => ({ ...f, meta: [...f.meta, { key: '', value: '' }] }))}
                 >
                   ＋ 键值
@@ -801,12 +854,12 @@ export function SnippetEditor({
               {form.meta.map((m, i) => (
                 <div className="editor-row meta" key={i}>
                   <input
-                    className="mono"
+                    className="ui-input mono"
                     value={m.key}
                     placeholder="键"
                     onChange={(e) => patchMeta(i, { key: e.target.value })}
                   />
-                  <textarea
+                  <textarea className="ui-textarea"
                     // 按内容估行高：`rows={1}` 时一句长 note 会被裁成一行半，
                     // 而「看不到自己在编辑什么」比多占两行高度糟得多
                     rows={Math.min(6, Math.max(2, Math.ceil(m.value.length / 44)))}
@@ -816,7 +869,7 @@ export function SnippetEditor({
                   />
                   <button
                     type="button"
-                    className="icon-btn small"
+                    className="ui-btn ui-btn--ghost ui-btn--icon ui-btn--xs"
                     aria-label={`删除 meta ${m.key}`}
                     onClick={() => setForm((f) => ({ ...f, meta: f.meta.filter((_, k) => k !== i) }))}
                   >
@@ -828,41 +881,7 @@ export function SnippetEditor({
           </>
         )}
 
-        {error && <p className="form-error">{error}</p>}
-
-        <div className="modal-actions">
-          {editing && (
-            <button
-              className={`btn${confirmDelete ? ' danger' : ' ghost'}`}
-              disabled={saving || loading}
-              onClick={() => (confirmDelete ? void remove() : setConfirmDelete(true))}
-              onBlur={() => setConfirmDelete(false)}
-            >
-              {confirmDelete ? '确认删除？' : '删除'}
-            </button>
-          )}
-          {editing && mode === 'form' && (
-            <button
-              className="btn ghost"
-              disabled={saving || loading}
-              title={`另存为 ${form.id.trim()}-copy`}
-              onClick={() => void duplicate()}
-            >
-              另存副本
-            </button>
-          )}
-          <span className="spacer" />
-          <button className="btn ghost" onClick={onClose}>
-            取消
-          </button>
-          <button
-            className="btn primary"
-            disabled={saving || loading || !!loadError}
-            onClick={() => void save()}
-          >
-            {saving ? '保存中…' : '保存'}
-          </button>
-        </div>
+        {error && <div className="ui-alert ui-alert--danger"><div className="ui-alert__body"><span className="ui-alert__title">{error}</span></div></div>}
     </Modal>
   )
 }

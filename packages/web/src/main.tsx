@@ -1,7 +1,15 @@
 import React, { Suspense } from 'react'
 import ReactDOM from 'react-dom/client'
 import { App } from './App'
+import { initTheme } from './shell'
+// 图标 symbol 随 bundle 一起加载，避免在 /terminal 这类 SPA 回退路径下
+// 相对路径 ./kakyo-ui/icons.js 被解析错而 404。副作用导入：注入 <svg> 到 body 开头。
+import './vendor/kakyo-ui/icons.js'
 import './styles.css'
+
+// 主题用 document 级事件委托，模块加载时挂一次即可，不受 React StrictMode 重挂载影响。
+// 抽屉开合由 App 的 navOpen state 驱动，不需要脚本。
+initTheme()
 
 // 两页共用一个入口，按路径分流：不值得为一个链接引入 router。
 // 服务端 setNotFoundHandler 已经把 /terminal 回退到 index.html。

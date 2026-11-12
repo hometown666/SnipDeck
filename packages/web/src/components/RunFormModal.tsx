@@ -1,6 +1,8 @@
-import type { HostView } from '../api'
+import type { HostView, InstancesView, ProgramsView } from '../api'
 import { MAX_TARGETS, type Draft } from '../types'
+import { InstancePicker } from './InstancePicker'
 import { Modal } from './Modal'
+import { ProgramPicker } from './ProgramPicker'
 
 /**
  * 执行表单：目标选择器（chips + 可选目标按钮）+ 变量表单 + 命令预览。
@@ -11,26 +13,57 @@ import { Modal } from './Modal'
 export function RunFormModal({
   draft,
   hosts,
+  instances,
+  instancesError,
+  programs,
+  programsError,
   preview,
   formError,
   onChange,
   onError,
   onSubmit,
   onPreview,
+  onReloadInstances,
+  onReloadPrograms,
   onClose,
 }: {
   draft: Draft
   hosts: HostView[]
+  /** 桥的实例表快照；null = 还没读到 */
+  instances: InstancesView | null
+  instancesError: string | null
+  /** 程序发现结果；null = 还没扫到 */
+  programs: ProgramsView | null
+  programsError: string | null
   preview: string[] | null
   formError: string | null
   onChange: (d: Draft) => void
   onError: (msg: string) => void
   onSubmit: () => void
   onPreview: () => void
+  onReloadInstances: () => void
+  onReloadPrograms: () => void
   onClose: () => void
 }) {
+  const picks = draft.snippet.picks ?? []
+  // 被 pick 吃掉的变量不再单独渲染；否则同一个 pro 会出现「下拉 + 输入框」两份
+  const consumed = new Set(picks.flatMap((p) => Object.values(p.vars)))
+
   return (
-    <Modal onClose={onClose}>
+    <Modal
+      onClose={onClose}
+      footer={
+        <>
+          <span className="modal-hint">Ctrl/⌘+Enter 直接执行</span>
+          <button className="btn ghost" onClick={onPreview}>
+            预览命令
+          </button>
+          <button className="btn primary" onClick={onSubmit}>
+            执行
+          </button>
+        </>
+      }
+    >
         <h3>{draft.snippet.title}</h3>
         <p className="modal-sub">
           {draft.snippet.id}
@@ -98,7 +131,35 @@ export function RunFormModal({
             <p className="field-note">最多 {MAX_TARGETS} 个目标（服务端上限）</p>
           )}
         </div>
-        {Object.entries(draft.snippet.vars).map(([k, v]) => (
+        {picks.map((pick, i) =>
+          pick.kind === 'programs' ? (
+            <ProgramPicker
+              key={`programs-${i}`}
+              pick={pick}
+              vars={draft.vars}
+              specs={draft.snippet.vars}
+              programs={programs}
+              instances={instances}
+              error={programsError}
+              onChange={(patch) => onChange({ ...draft, vars: { ...draft.vars, ...patch } })}
+              onReload={onReloadPrograms}
+            />
+          ) : (
+            <InstancePicker
+              key={`${pick.mode}-${i}`}
+              pick={pick}
+              vars={draft.vars}
+              specs={draft.snippet.vars}
+              instances={instances}
+              error={instancesError}
+              onChange={(patch) => onChange({ ...draft, vars: { ...draft.vars, ...patch } })}
+              onReload={onReloadInstances}
+            />
+          ),
+        )}
+        {Object.entries(draft.snippet.vars)
+          .filter(([k]) => !consumed.has(k))
+          .map(([k, v]) => (
           <label key={k} className="field">
             <span>
               {v.prompt ?? k}
@@ -127,15 +188,6 @@ export function RunFormModal({
         ))}
         {preview && <pre className="preview">{preview.map((c) => `$ ${c}`).join('\n')}</pre>}
         {formError && <p className="form-error">{formError}</p>}
-        <div className="modal-actions">
-          <span className="modal-hint">Ctrl/⌘+Enter 直接执行</span>
-          <button className="btn ghost" onClick={onPreview}>
-            预览命令
-          </button>
-          <button className="btn primary" onClick={onSubmit}>
-            执行
-          </button>
-        </div>
     </Modal>
   )
 }

@@ -51,15 +51,37 @@ function check(name, ok, extra = '') {
   }
 }
 
-async function apiCall(method, path) {
+async function apiCall(method, path, body) {
+  const headers = token ? { Authorization: `Bearer ${token}` } : {}
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
   const res = await fetch(`${apiBase}${path}`, {
     method,
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
   })
   return { status: res.status, body: await res.text() }
 }
 
-// 从干净状态开始，跑完也回到干净状态
+/**
+ * 先记下跑之前的机器级配置，结束时原样写回。
+ * 这个脚本中途会把 settings 清空（要验「清空回默认」那条），以前收尾直接 DELETE，
+ * 于是**跑一次回归就把用户在 ⚙ 里填的 PROG_DIR / AHK_DIR 抹掉了**（2026-11-10 踩到）。
+ */
+const settingsBefore = await apiCall('GET', '/api/settings')
+let restoreSettings = null
+try {
+  const s = JSON.parse(settingsBefore.body)
+  restoreSettings = {
+    progDir: typeof s.progDir === 'string' ? s.progDir : '',
+    ahkDir: typeof s.ahkDir === 'string' ? s.ahkDir : '',
+    runsTtlDays: s.runs?.isDefault ? 0 : (s.runs?.ttlDays ?? 0),
+    runsMaxFiles: s.runs?.isDefault ? 0 : (s.runs?.maxFiles ?? 0),
+  }
+} catch {
+  // 读不到就退回「清空」的老行为
+}
+
+// 从干净状态开始
 await apiCall('DELETE', '/api/settings')
 
 const chrome = spawn(
@@ -183,6 +205,29 @@ try {
   )
   check('内容超长时内层真的滚起来', shell?.scrolls === true, JSON.stringify(shell))
 
+  // 底栏单独一层：内容全在 .modal-scroll 里，按钮在 .modal-footer 里，两者不重叠
+  const foot = await evalJs(`(() => {
+    const m = document.querySelector('.modal')
+    const a = m?.querySelector('.modal-footer')
+    const sc = m?.querySelector('.modal-scroll')
+    if (!m || !a || !sc) return { ok: false }
+    const mb = m.getBoundingClientRect()
+    const ab = a.getBoundingClientRect()
+    const sb = sc.getBoundingClientRect()
+    return {
+      ok: true,
+      outsideScroll: !sc.contains(a),
+      pinnedToBottom: Math.abs(ab.bottom - mb.bottom) <= 1,
+      stackedUnderScroll: Math.abs(ab.top - sb.bottom) <= 1,
+      hasDone: [...a.querySelectorAll('.btn')].some((b) => b.textContent.trim() === '完成'),
+    }
+  })()`)
+  check(
+    '「完成」在滚动区之外的底栏里',
+    foot?.ok === true && foot.outsideScroll && foot.pinnedToBottom && foot.stackedUnderScroll && foot.hasDone,
+    JSON.stringify(foot),
+  )
+
   const section = await evalJs(`(() => ({
     hasSection: !!document.querySelector('.env-section'),
     labels: [...document.querySelectorAll('.env-section .field span')].map((n) => n.textContent.trim()),
@@ -196,8 +241,9 @@ try {
     JSON.stringify(section?.labels),
   )
   check(
+    // 不再说「默认桌面」：空值的真实含义是「不注入，桥用自己的默认」，那个值服务端看不到
     '空值给出默认提示',
-    section?.inputs?.[0]?.includes('桌面') && section?.inputs?.[1]?.includes('未配置'),
+    section?.inputs?.[0]?.includes('不注入') && section?.inputs?.[1]?.includes('未配置'),
     JSON.stringify(section?.inputs),
   )
 
@@ -260,7 +306,7 @@ try {
   check('清空后输入框为空', cleared?.values?.every((v) => v === ''), JSON.stringify(cleared?.values))
   check(
     '清空后生效行回到默认说明',
-    cleared?.notes?.[0]?.includes('桌面'),
+    cleared?.notes?.[0]?.includes('未注入'),
     JSON.stringify(cleared?.notes),
   )
   const afterClear = JSON.parse((await apiCall('GET', '/api/settings')).body)
@@ -421,8 +467,18 @@ try {
     // ignore
   }
   chrome.kill()
-  // 收尾：不留配置/探针目标，免得后面跑别的回归时带着它们
-  await apiCall('DELETE', '/api/settings')
+  // 收尾：把机器级配置还原成跑之前的样子（原来直接 DELETE，会把用户填的目录抹掉）
+  if (
+    restoreSettings &&
+    (restoreSettings.progDir ||
+      restoreSettings.ahkDir ||
+      restoreSettings.runsTtlDays ||
+      restoreSettings.runsMaxFiles)
+  ) {
+    await apiCall('PUT', '/api/settings', restoreSettings)
+  } else {
+    await apiCall('DELETE', '/api/settings')
+  }
   if (hostProbe) {
     await apiCall('DELETE', `/api/hosts/${encodeURIComponent(hostProbe)}`)
     await apiCall('DELETE', `/api/hosts/${encodeURIComponent(hostProbe + 'b')}`)

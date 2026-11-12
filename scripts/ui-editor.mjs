@@ -183,7 +183,7 @@ try {
       const b = el.getBoundingClientRect()
       return b.right > mb.right + 1 || b.left < mb.left - 1
     }).length
-    const actions = modal.querySelector('.modal-actions')
+    const actions = modal.querySelector('.modal-footer')
     const ab = actions ? actions.getBoundingClientRect() : null
     return {
       w: Math.round(mb.width),
@@ -206,7 +206,7 @@ try {
     check('没有输入控件溢出弹窗', geo.overflow === 0, `${geo.overflow} 个`)
     check('变量行与步骤都渲染出来了', geo.vars >= 3 && geo.steps === 2, JSON.stringify(geo))
     check('页面没有横向溢出', geo.docNoHScroll === true)
-    check('底部按钮在视野内（sticky）', geo.actionsVisible === true)
+    check('底部按钮固定在外层底栏（不在滚动区里）', geo.actionsVisible === true)
   }
 
   // 结构化命令：动作选择驱动字段显隐，预览行必须跟着变
@@ -217,7 +217,7 @@ try {
       has: true,
       action: b.querySelector('select')?.value,
       inputs: b.querySelectorAll('input:not([type=checkbox])').length,
-      preview: b.querySelector('.cmd-preview')?.textContent ?? '',
+      preview: b.querySelector('.cmd-preview-code')?.textContent ?? '',
     }
   })()`)
   check('run 步骤有结构化命令区', builderInit?.has === true, JSON.stringify(builderInit))
@@ -235,7 +235,7 @@ try {
   await sleep(300)
   const afterLnk = await evalJs(`(() => {
     const b = document.querySelector('.cmd-builder')
-    return { inputs: b.querySelectorAll('input:not([type=checkbox])').length, preview: b.querySelector('.cmd-preview').textContent }
+    return { inputs: b.querySelectorAll('input:not([type=checkbox])').length, preview: b.querySelector('.cmd-preview-code').textContent }
   })()`)
   check('选「打开快捷方式」只出现一个值输入框', afterLnk?.inputs === 1, JSON.stringify(afterLnk))
   check('预览生成 ahk.bat lnk', String(afterLnk?.preview).includes('ahk.bat lnk'), afterLnk?.preview)
@@ -244,7 +244,7 @@ try {
   await sleep(300)
   const afterStatus = await evalJs(`(() => {
     const b = document.querySelector('.cmd-builder')
-    return { inputs: b.querySelectorAll('input:not([type=checkbox])').length, preview: b.querySelector('.cmd-preview').textContent }
+    return { inputs: b.querySelectorAll('input:not([type=checkbox])').length, preview: b.querySelector('.cmd-preview-code').textContent }
   })()`)
   check('选「刷新状态」不给任何输入框', afterStatus?.inputs === 0, JSON.stringify(afterStatus))
   check('预览就是 ahk.bat status', String(afterStatus?.preview).trim().endsWith('ahk.bat status'), afterStatus?.preview)
@@ -253,10 +253,33 @@ try {
   await sleep(300)
   const afterClick = await evalJs(`(() => {
     const b = document.querySelector('.cmd-builder')
-    return { inputs: b.querySelectorAll('input:not([type=checkbox])').length, preview: b.querySelector('.cmd-preview').textContent }
+    return { inputs: b.querySelectorAll('input:not([type=checkbox])').length, preview: b.querySelector('.cmd-preview-code').textContent }
   })()`)
   check('选「点一下」要槽位 + x + y 三个框', afterClick?.inputs === 3, JSON.stringify(afterClick))
   check('预览带 click 与坐标', String(afterClick?.preview).includes('ahk.bat click'), afterClick?.preview)
+
+  // 槽位 datalist：有实例时应带 list；没有实例时不该硬造一个空建议
+  await sleep(500)
+  const datalist = await evalJs(`(() => {
+    const b = document.querySelector('.cmd-builder')
+    const slot = b ? b.querySelector('input[list]') : null
+    const list = slot ? document.getElementById(slot.getAttribute('list')) : null
+    const badge = document.querySelector('button.badge')?.textContent ?? ''
+    const m = /(\\d+)\\s*$/.exec(badge)
+    return {
+      hasList: !!slot,
+      options: list ? [...list.options].map((o) => o.value) : [],
+      count: m ? Number(m[1]) : null,
+    }
+  })()`)
+  if (datalist?.count && datalist.count > 0) {
+    check('槽位输入带实例 datalist', datalist.hasList === true, JSON.stringify(datalist))
+    check(
+      'datalist 里都是槽位',
+      datalist.options.length > 0 && datalist.options.every((v) => String(v).includes('#')),
+      JSON.stringify(datalist.options),
+    )
+  }
 
   // 回到自定义，把探针片段还原成 echo（后面保存/读回用的是这条）
   await evalJs(pickAction('custom'))
@@ -270,18 +293,29 @@ try {
     return 'ok'
   })()`)
 
-  // 滚到顶再量一次：底部按钮不该被滚走
+  // 滚到顶再量一次：底栏必须在滚动区之外、贴着弹窗下沿（不是 sticky 假固定）
   await evalJs(`(() => { const m = document.querySelector('.modal.editor .modal-scroll') || document.querySelector('.modal.editor'); if (m) m.scrollTop = 0; return 'ok' })()`)
   await sleep(300)
-  const stickyAtTop = await evalJs(`(() => {
+  const footerBox = await evalJs(`(() => {
     const m = document.querySelector('.modal.editor')
-    const a = m?.querySelector('.modal-actions')
-    if (!m || !a) return false
+    const a = m?.querySelector('.modal-footer')
+    const sc = m?.querySelector('.modal-scroll')
+    if (!m || !a || !sc) return { ok: false }
     const mb = m.getBoundingClientRect()
     const ab = a.getBoundingClientRect()
-    return ab.bottom <= mb.bottom + 1 && ab.top >= mb.top - 1
+    const sb = sc.getBoundingClientRect()
+    return {
+      ok: true,
+      outsideScroll: !sc.contains(a),
+      pinnedToBottom: Math.abs(ab.bottom - mb.bottom) <= 1,
+      stackedUnderScroll: Math.abs(ab.top - sb.bottom) <= 1,
+    }
   })()`)
-  check('滚到顶时底部按钮仍可见', stickyAtTop === true)
+  check(
+    '底栏在滚动区之外、紧贴其下方',
+    footerBox?.ok === true && footerBox.outsideScroll && footerBox.pinnedToBottom && footerBox.stackedUnderScroll,
+    JSON.stringify(footerBox),
+  )
 
   const shot1 = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
   writeFileSync(out, Buffer.from(shot1.result.data, 'base64'))
@@ -301,7 +335,7 @@ try {
   check('能把标题改掉（受控输入生效）', typed === newTitle, String(typed))
 
   const saved = await evalJs(`(() => {
-    const btn = [...document.querySelectorAll('.modal-actions .btn')].find((b) => b.textContent.includes('保存'))
+    const btn = [...document.querySelectorAll('.modal-footer button')].find((b) => b.textContent.includes('保存'))
     if (!btn) return 'no-save'
     btn.click()
     return 'clicked'
@@ -340,7 +374,7 @@ try {
   })()`)
   await sleep(1400)
   const switched = await evalJs(`(() => {
-    const tab = [...document.querySelectorAll('.editor-tab')].find((b) => b.textContent.trim() === '原文')
+    const tab = [...document.querySelectorAll('.editor-tabs button')].find((b) => b.textContent.trim() === '原文')
     if (!tab) return 'no-tab'
     tab.click()
     return 'clicked'
@@ -389,7 +423,7 @@ try {
   check('能在原文顶部插一行注释', injected === 'ok', String(injected))
 
   await evalJs(`(() => {
-    const btn = [...document.querySelectorAll('.modal-actions .btn')].find((b) => b.textContent.includes('保存'))
+    const btn = [...document.querySelectorAll('.modal-footer button')].find((b) => b.textContent.includes('保存'))
     btn?.click()
     return 'ok'
   })()`)
@@ -418,7 +452,7 @@ try {
   })()`)
   await sleep(1400)
   const dupClicked = await evalJs(`(() => {
-    const b = [...document.querySelectorAll('.modal-actions .btn')].find((x) => x.textContent.includes('另存副本'))
+    const b = [...document.querySelectorAll('.modal-footer button')].find((x) => x.textContent.includes('另存副本'))
     if (!b) return 'no-btn'
     b.click()
     return 'clicked'
@@ -443,20 +477,20 @@ try {
   })()`)
   await sleep(1400)
   await evalJs(`(() => {
-    const b = [...document.querySelectorAll('.modal-actions .btn')].find((x) => x.textContent.trim() === '删除')
+    const b = [...document.querySelectorAll('.modal-footer button')].find((x) => x.textContent.trim() === '删除')
     b?.click()
     return 'ok'
   })()`)
   await sleep(400)
   const confirmLabel = await evalJs(
-    `[...document.querySelectorAll('.modal-actions .btn')].map((x) => x.textContent.trim()).join('|')`,
+    `[...document.querySelectorAll('.modal-footer button')].map((x) => x.textContent.trim()).join('|')`,
   )
   check('删除第一次点击只换文案', String(confirmLabel).includes('确认删除'), String(confirmLabel))
   const delShot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
   writeFileSync(out.replace(/\.png$/, '-delconfirm.png'), Buffer.from(delShot.result.data, 'base64'))
 
   await evalJs(`(() => {
-    const b = [...document.querySelectorAll('.modal-actions .btn')].find((x) => x.textContent.includes('确认删除'))
+    const b = [...document.querySelectorAll('.modal-footer button')].find((x) => x.textContent.includes('确认删除'))
     b?.click()
     return 'ok'
   })()`)
@@ -465,7 +499,7 @@ try {
     toast: document.querySelector('.toast')?.textContent ?? null,
     editorOpen: !!document.querySelector('.modal.editor'),
     error: document.querySelector('.editor .form-error')?.textContent ?? null,
-    actions: [...document.querySelectorAll('.modal-actions .btn')].map((x) => x.textContent.trim()).join('|'),
+    actions: [...document.querySelectorAll('.modal-footer button')].map((x) => x.textContent.trim()).join('|'),
     cardStillThere: [...document.querySelectorAll('button.card')].some((b) => {
       const meta = (b.querySelector('.card-meta')?.textContent ?? '').trim()
       return meta === ${JSON.stringify(probeId)} || meta.startsWith(${JSON.stringify(probeId)} + ' ')

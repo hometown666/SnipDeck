@@ -37,6 +37,7 @@ export function SnippetList({
     <div className="content">
       <div className="searchbar">
         <input
+          className="ui-input"
           data-search
           type="search"
           placeholder="搜索片段（id / 标题 / 分组 / 标签）…"
@@ -49,9 +50,11 @@ export function SnippetList({
       </div>
 
       {needToken && (
-        <div className="banner">
-          这台设备还没有 token，先填一次才能执行片段。
-          <button className="link" onClick={onFillToken}>
+        <div className="ui-alert ui-alert--warning" style={{ marginTop: 10 }}>
+          <div className="ui-alert__body">
+            <span className="ui-alert__title">这台设备还没有 token，先填一次才能执行片段。</span>
+          </div>
+          <button className="ui-btn ui-btn--link ui-btn--sm" onClick={onFillToken}>
             去填写
           </button>
         </div>
@@ -116,7 +119,9 @@ export function SnippetList({
             </div>
           </section>
         ))}
-        {groups.length === 0 && <p className="empty">没有匹配的片段</p>}
+        {groups.length === 0 && (
+          <div className="ui-empty"><p className="ui-empty__desc">没有匹配的片段</p></div>
+        )}
       </main>
     </div>
   )

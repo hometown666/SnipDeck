@@ -1,0 +1,24 @@
+/* ==========================================================================
+   kakyo-ui 接入层 · SnipDeck（remote text control）
+   --------------------------------------------------------------------------
+   引入顺序（styles.css 顶部用 @import，Vite 会并入同一个 CSS）：
+
+       @import './vendor/kakyo-ui/ui.css';      组件库
+       @import './vendor/kakyo-ui/site.css';    展示站骨架（@layer site）
+       @import './adapter.css';                 本文件
+       …项目自己的规则…
+
+   **这里不再映射 --ui-***。
+   旧版本把项目的 --bg / --surface / --accent 反向喂给 --ui-*，那会盖掉
+   <html data-theme="claude" data-mode="dark"> 的主题色；而 styles.css 现在
+   又把 --bg 别名到 --ui-*，两者同时存在会形成循环引用，变量全部失效。
+   皮肤统一由 data-theme / data-mode 提供，项目侧只消费 token。
+
+   本文件只放「组件在项目里必须的微调」，站点级布局由 site.css 负责。
+   ========================================================================== */
+
+/* 命令预览：原来是一条虚线框的 <p>，换成 .ui-code 之后由组件提供外框。
+   这里只补外边距——组件不假设自己在什么容器里。 */
+.cmd-preview-code {
+  margin: 8px 0 0;
+}

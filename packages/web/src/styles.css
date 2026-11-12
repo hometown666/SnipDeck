@@ -1,17 +1,30 @@
+/* ==========================================================================
+   kakyo-web-ui-components · 统一 UI 接入
+   --------------------------------------------------------------------------
+   顺序不能反：组件库 → 接入层 → 项目自己的样式。
+   @import 必须放在所有规则之前（CSS 规范要求），所以这里插在文件最顶上，
+   原来的 :root 定义原样保留在后面。
+   ========================================================================== */
+
+@import './vendor/kakyo-ui/ui.css';
+@import './vendor/kakyo-ui/site.css';
+@import './adapter.css';
+
 :root {
-  --bg: #f7f7f5;
-  --surface: #ffffff;
-  --border: #e3e2dc;
-  --text: #26251f;
-  --text-2: #6f6e66;
-  --accent: #0f6e56;
-  --accent-soft: #e1f5ee;
-  --danger: #a32d2d;
-  --danger-soft: #fcebeb;
-  --amber: #854f0b;
-  --amber-soft: #faeeda;
-  --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, "Sarasa Mono SC",
-    "Noto Sans Mono CJK SC", "Microsoft YaHei", monospace;
+  /* 色板改为单向别名：皮肤由 <html data-theme data-mode> 驱动。
+     下面 1700 行里所有 var(--bg) / var(--accent) 会自动跟随换肤。 */
+  --bg: var(--ui-surface-1);
+  --surface: var(--ui-surface-2);
+  --border: var(--ui-border);
+  --text: var(--ui-text);
+  --text-2: var(--ui-text-muted);
+  --accent: var(--ui-primary);
+  --accent-soft: var(--ui-primary-soft);
+  --danger: var(--ui-danger);
+  --danger-soft: var(--ui-danger-soft);
+  --amber: var(--ui-warning);
+  --amber-soft: var(--ui-warning-soft);
+  --mono: var(--ui-font-mono);
 }
 
 * {
@@ -92,6 +105,17 @@ body {
   border-color: transparent;
 }
 
+/* 顶栏的 bridge 徽标现在是按钮（打开实例表）：其余样式沿用 .badge */
+button.badge {
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+button.badge:hover {
+  filter: brightness(0.97);
+}
+
 .icon-btn {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -105,7 +129,7 @@ body {
 
 .icon-btn:hover {
   color: var(--text);
-  border-color: #d6d5cd;
+  border-color: var(--ui-border-strong);
 }
 
 .icon-btn.on {
@@ -114,7 +138,6 @@ body {
   background: var(--accent-soft);
 }
 
-.searchbar input,
 .sidebar-search input {
   width: 100%;
   padding: 11px 14px;
@@ -125,7 +148,6 @@ body {
   outline: none;
 }
 
-.searchbar input:focus,
 .sidebar-search input:focus {
   border-color: var(--accent);
 }
@@ -235,7 +257,7 @@ body {
 }
 
 .card.danger {
-  border-color: #f0b9b9;
+  border-color: var(--ui-danger);
   background: var(--danger-soft);
 }
 
@@ -243,40 +265,10 @@ body {
   color: var(--danger);
 }
 
-.empty {
-  color: var(--text-2);
-  text-align: center;
-  padding: 40px 0;
-}
-
-.banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  background: var(--amber-soft);
-  color: var(--amber);
-  border-radius: 10px;
-  padding: 10px 12px;
-  margin: 10px 0 0;
-  font-size: 13px;
-}
-
-.link {
-  border: 0;
-  background: none;
-  padding: 0;
-  font: inherit;
-  color: inherit;
-  text-decoration: underline;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
 .modal-mask {
   position: fixed;
   inset: 0;
-  background: rgba(20, 20, 16, 0.4);
+  background: var(--ui-overlay);
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -296,12 +288,29 @@ body {
   overflow: hidden;
 }
 
+/* 内容容器：弹窗里所有内容都在这层里滚，底栏不算它的内容 */
 .modal-scroll {
+  /* flex 子项默认 min-height:auto，不设这个内层撑不开、也就滚不动 */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 20px 18px 24px;
-  /* flex 子项默认 min-height:auto，不设这个内层撑不开、也就滚不动 */
-  min-height: 0;
+  /* 底部留白小一点：按钮区的分隔线和内边距已经隔开了 */
+  padding: 20px 18px 16px;
+}
+
+/* 底部按钮条：不在滚动容器里，所以永远可见、也永远不挡内容。
+   底色比内容区暗一档（--bg 而不是 --surface）：滚动条滚到这儿会被裁掉，
+   没有色差时按钮像是"浮在内容上"，有色差才像一个独立的底栏。 */
+.modal-footer {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
 }
 
 .modal h3 {
@@ -328,18 +337,182 @@ body {
 }
 
 /* ——— 运行历史（P4） ——— */
-.history-modal {
+.modal.history {
   max-width: 640px;
+}
+
+/* ——— 实例表（P7.1） ——— */
+.modal.bridge-modal {
+  max-width: 620px;
+}
+
+.bridge-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 2px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.bridge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+
+.bridge-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.bridge-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.bridge-card__slot {
+  font-family: var(--ui-font-mono);
+  font-size: 13px;
+  color: var(--text);
+}
+
+.bridge-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.bridge-alive {
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.bridge-alive.on {
+  color: var(--accent);
+}
+
+.bridge-alive.off {
+  color: var(--danger);
+}
+
+.bridge-modal code {
+  word-break: break-all;
+}
+
+/* ——— 实例下拉（P7.2） ——— */
+.instance-picker {
+  margin: 12px 0 4px;
+}
+
+.picker-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.picker-head .hint {
+  color: var(--text-2);
+  font-weight: 400;
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+.picker-toggle {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  padding: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.picker-toggle:hover {
+  text-decoration: underline;
+}
+
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.picker-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.picker-row .icon-btn {
+  flex: 0 0 auto;
+}
+
+.instance-picker .picker-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 下拉/输入铺满容器：<select> 的宽度默认跟最长 option 走，手机上会顶出 7px */
+.instance-picker .field > input,
+.instance-picker .field > select {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* 被黑名单挡掉的程序：默认折叠，展开后每行「名字 —— 原因」 */
+.program-filtered {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2, transparent);
+  font-size: 12px;
+}
+
+.program-filtered__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.program-filtered__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.program-filtered__why {
+  flex: 0 0 auto;
+  color: var(--text-2);
 }
 
 .run-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  /* 历史可能几十条：弹窗内滚动，别把整个 modal 撑到天上去 */
-  max-height: 52vh;
-  overflow: auto;
-  margin: 4px 0 12px;
+  /* 历史可能几十条：滚动交给 .modal-scroll，这里再套一层就会出双滚动条
+     （外面一条、列表里一条，两条并排贴在右边框上，看着像渲染坏了） */
+  margin: 4px 0 0;
 }
 
 .run-row {
@@ -416,12 +589,6 @@ body {
 .field span .req {
   color: var(--danger);
   font-style: normal;
-}
-
-.form-error {
-  color: var(--danger);
-  font-size: 13px;
-  margin: 8px 0 0;
 }
 
 /* 目标数到上限时的静态提示（不是错误，别用红色） */
@@ -519,29 +686,19 @@ body {
 /* reserved 目标（P5 预留）：看得见、点不动 */
 .target-btn:disabled {
   cursor: not-allowed;
-  color: #b3b2ab;
+  color: var(--ui-text-faint);
   border-color: var(--border);
   background: var(--bg);
 }
 
 .target-btn:disabled em {
-  color: #b3b2ab;
+  color: var(--ui-text-faint);
   font-size: 11px;
 }
 
-.field input,
-.field select {
-  width: 100%;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  font-size: 15px;
-  background: var(--surface);
-}
-
 .preview {
-  background: #26251f;
-  color: #e8e7df;
+  background: var(--ui-surface-0);
+  color: var(--ui-text);
   font-family: var(--mono);
   font-size: 12.5px;
   line-height: 1.55;
@@ -565,56 +722,7 @@ body {
   color: var(--text-2);
 }
 
-.btn {
-  border-radius: 10px;
-  padding: 10px 18px;
-  font-size: 15px;
-  cursor: pointer;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
-}
-
-.btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-.btn.danger {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
-}
-
-.btn.ghost {
-  background: transparent;
-}
-
 /* ---------------- 运行抽屉 ---------------- */
-
-.drawer {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: var(--surface);
-  border-top: 2px solid var(--border);
-  z-index: 15;
-  max-height: 62vh;
-  border-radius: 14px 14px 0 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.drawer.running,
-.drawer.ok {
-  border-top-color: var(--accent);
-}
-
-.drawer.fail {
-  border-top-color: var(--danger);
-}
 
 .drawer-head {
   display: flex;
@@ -642,10 +750,6 @@ body {
 .drawer-status,
 .drawer-count,
 .drawer-badge,
-.drawer-tools {
-  flex-shrink: 0;
-}
-
 /* 回放态的时间戳：告诉人「这是历史，不是刚刚跑的」 */
 .drawer-badge {
   display: inline-flex;
@@ -777,7 +881,7 @@ body {
 }
 
 /* 「自动换行」开关：断点优先落在分隔符之后，而不是任意字符处 */
-.drawer.wrap .drawer-body {
+.run-modal.wrap .drawer-body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: normal;
@@ -884,9 +988,14 @@ body {
     border-radius: 18px 18px 0 0;
   }
 
-  /* 内边距挪到滚动层：外层只负责圆角与裁剪 */
+  /* 内边距挪到滚动层：外层只负责圆角与裁剪；
+     安全区由底部按钮条承接——它才是贴着手机下沿的那一层 */
   .modal-scroll {
-    padding-bottom: max(24px, env(safe-area-inset-bottom));
+    padding-bottom: 16px;
+  }
+
+  .modal-footer {
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
   }
 
   .modal-hint {
@@ -1039,7 +1148,11 @@ body {
   }
 
   .modal-scroll {
-    padding: 22px 22px 20px;
+    padding: 22px 22px 16px;
+  }
+
+  .modal-footer {
+    padding: 10px 22px;
   }
 
   /* 抽屉：右侧全高面板，覆盖主区而不挤压 */
@@ -1107,7 +1220,7 @@ body {
 
 .tab.on {
   background: var(--accent-soft);
-  border-color: #cfe9e0;
+  border-color: var(--ui-success);
   color: var(--accent);
   font-weight: 500;
 }
@@ -1172,43 +1285,15 @@ body {
   font-size: 12.5px;
 }
 
-.check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text-2);
-  margin: 2px 0 14px;
-}
-
-.check input {
-  margin: 0;
-}
-
-.mini-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--text-2);
-  white-space: nowrap;
-}
-
 .editor-section {
   border-top: 1px solid var(--border);
   padding-top: 10px;
   margin-top: 4px;
 }
 
-/* 字段多的时候「保存」会被滚出视野。粘在底部——
-   编辑到一半发现要保存还得先滚到底，是个很小但每次都要付出的成本。 */
-.editor .modal-actions {
-  position: sticky;
-  bottom: 0;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  padding: 10px 0 2px;
-  margin-top: 12px;
+/* 字段多的时候「保存」会被滚出视野。现在按钮在 .modal-footer 里、永远贴着弹窗下沿，
+   不再需要 sticky（sticky 会盖住最后一行内容）。这里只解决一行放不下四颗按钮的问题。 */
+.modal.editor .modal-footer {
   /* 删除 / 另存副本 / 取消 / 保存 四颗按钮，390 宽一行放不下 */
   flex-wrap: wrap;
   row-gap: 8px;
@@ -1219,28 +1304,6 @@ body {
   display: flex;
   gap: 4px;
   margin: 10px 0 6px;
-}
-
-.editor-tab {
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text-2);
-  border-radius: 8px;
-  padding: 5px 12px;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.editor-tab.on {
-  background: var(--accent-soft);
-  border-color: #cfe9e0;
-  color: var(--accent);
-  font-weight: 500;
-}
-
-.editor-tab:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 
 /* 原文编辑区：行号列 + 文本框。两者必须共用字号 / 行高 / 上下 padding，
@@ -1300,7 +1363,7 @@ body {
   color: var(--text-2);
 }
 
-.editor-section h4 .btn.tiny {
+.editor-section h4 .ui-btn--xs {
   margin-left: auto;
 }
 
@@ -1324,29 +1387,9 @@ body {
 }
 
 /* timeout / flags 这类短字段不该跟命令正文一样宽 */
-.editor-row.tight input {
-  max-width: 240px;
-}
-
 .editor-row.meta {
   grid-template-columns: 0.7fr 1fr auto;
   align-items: start;
-}
-
-.editor-row input {
-  width: 100%;
-  padding: 7px 9px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-}
-
-.editor-row input.mono {
-  font-family: var(--mono);
-  font-size: 12px;
 }
 
 .editor-step {
@@ -1387,23 +1430,6 @@ body {
 
 .spacer {
   flex: 1;
-}
-
-.btn.tiny {
-  padding: 4px 10px;
-  font-size: 12.5px;
-  border-radius: 8px;
-}
-
-.icon-btn.small {
-  width: 26px;
-  height: 26px;
-  font-size: 14px;
-}
-
-.icon-btn:disabled {
-  opacity: 0.35;
-  cursor: default;
 }
 
 /* 编辑入口：右下角，与右上角的 ⊕ 对角分开。
@@ -1455,8 +1481,8 @@ body {
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%);
-  background: #26251f;
-  color: #f2f1ea;
+  background: var(--ui-surface-0);
+  color: var(--ui-text);
   font-size: 13px;
   padding: 9px 16px;
   border-radius: 999px;
@@ -1722,4 +1748,104 @@ body {
 
 .warn-note {
   color: var(--amber);
+}
+
+/* ==========================================================================
+   展示站骨架接入（site.css 的类由 React 组件直接渲染）
+   ========================================================================== */
+.site-shell { min-height: 100dvh; }
+.site-brand__mark { font-family: var(--ui-font-mono); }
+.sidebar-search { padding: 0 8px 10px; }
+.sidebar-search input {
+  background: var(--ui-surface-0);
+  color: var(--ui-text);
+  border-color: var(--ui-border);
+  font-size: var(--ui-text-sm);
+  padding: 7px 10px;
+  border-radius: var(--ui-radius-md);
+}
+.site-nav__item { background: none; border: 0; width: 100%; text-align: left; font: inherit; cursor: pointer; }
+.site-nav__item em { margin-left: auto; font-style: normal; font-size: var(--ui-text-2xs); color: var(--ui-text-faint); }
+.site-status__dot { flex-shrink: 0; }
+.toc__link { cursor: pointer; }
+.toc__link:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+/* site.css 的 .page-body 在 ≤1023px 转 column 但带 align-items:flex-start，
+   flex item 会按内容宽度收缩，长内容会撑出横向滚动。 */
+@media(max-width:1023px){
+  .page-body { align-items: stretch; }
+  .toc, .page-content { align-self: stretch; width: 100%; min-width: 0; }
+  /* 桥状态已在左栏 .site-status 有位置，窄屏页头只留四个动作按钮，避免挤成一团 */
+  .site-header__actions .badge { display: none; }
+}
+
+/* ==========================================================================
+   第 2 批 · 原子件改用组件库后的布局兜底
+   （这些只是尺寸/字体，颜色边框全部由 @layer components 的 ui-* 提供）
+   ========================================================================== */
+.searchbar .ui-input { width: 100%; }
+.editor-grid .field .ui-input { width: 100%; }
+.editor-row .ui-input, .editor-row .ui-textarea { min-width: 0; }
+.editor-row.tight .ui-input { max-width: 240px; }
+.ui-input.mono, .ui-textarea.mono { font-family: var(--ui-font-mono); font-size: var(--ui-text-xs); }
+.ui-checkbox.mini .ui-checkbox__label { font-size: var(--ui-text-xs); }
+
+/* ==========================================================================
+   运行结果弹窗（原贴底抽屉 .drawer）
+   Modal 外壳负责遮罩 / 点击外部关闭 / 固定底栏；这里只定尺寸与滚动分层。
+   ========================================================================== */
+.modal-mask.is-centered {
+  align-items: center;
+  padding: 20px;
+}
+
+.modal.run-modal {
+  width: min(960px, 92vw);
+  max-width: none;
+  /* 高度跟着内容收缩，只设上限：几行日志时不要留一大片空白。
+     长日志时 .modal-scroll 收缩、.panes 吃掉剩余高度、每块 .drawer-body 各自滚。 */
+  max-height: min(76vh, 720px);
+  min-height: 240px;
+  border-radius: var(--ui-radius-2xl);
+  border-top: 2px solid var(--ui-border);
+}
+
+.modal.run-modal.running,
+.modal.run-modal.ok { border-top-color: var(--ui-primary); }
+.modal.run-modal.fail { border-top-color: var(--ui-danger); }
+
+/* 关键：外层不滚，让 .panes 吃掉剩余高度，每块 .drawer-body 才能独立滚动。
+   否则多目标并列时会退化成整块一起滚，长日志把短日志一起顶走。 */
+.modal.run-modal .modal-scroll {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.modal.run-modal .panes {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.run-modal__hint {
+  margin-right: auto;
+  font-size: var(--ui-text-xs);
+  color: var(--ui-text-faint);
+}
+
+/* 窄屏回到熟悉的底部弹窗，避免 390px 下居中弹窗把日志压成一条缝 */
+@media (max-width: 640px) {
+  .modal-mask.is-centered {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal.run-modal {
+    width: 100%;
+    height: 86vh;
+    max-height: 86vh;
+    border-radius: var(--ui-radius-2xl) var(--ui-radius-2xl) 0 0;
+  }
+
+  .run-modal__hint { display: none; }
 }

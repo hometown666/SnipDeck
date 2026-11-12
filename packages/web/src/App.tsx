@@ -6,10 +6,13 @@ import {
   setToken,
   type HealthView,
   type HostView,
+  type InstancesView,
+  type ProgramsView,
   type RunEvent,
   type RunListItem,
   type SnippetView,
 } from './api'
+import { BridgeModal } from './components/BridgeModal'
 import { DangerModal } from './components/DangerModal'
 import { HistoryModal } from './components/HistoryModal'
 import { RunDrawer } from './components/RunDrawer'
@@ -50,6 +53,13 @@ export function App() {
   const [formError, setFormError] = useState<string | null>(null)
   const [needToken, setNeedToken] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  /** 桥的只读快照（实例表）：只在页面加载 / 弹窗打开 / run 结束时拉 */
+  const [bridge, setBridge] = useState<InstancesView | null>(null)
+  const [bridgeError, setBridgeError] = useState<string | null>(null)
+  /** 程序发现结果：只为「要选程序」的表单拉一次，不轮询（服务端有 60s 缓存） */
+  const [programs, setPrograms] = useState<ProgramsView | null>(null)
+  const [programsError, setProgramsError] = useState<string | null>(null)
+  const [showBridge, setShowBridge] = useState(false)
   const [tokenInput, setTokenInput] = useState('')
   const [tokenError, setTokenError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -61,6 +71,9 @@ export function App() {
   /** 编辑器：null = 关；{ id } = 编辑某条；{} = 新建 */
   const [editor, setEditor] = useState<{ id?: string } | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  /** 展示站骨架：移动端左侧抽屉 + 目录高亮 */
+  const [navOpen, setNavOpen] = useState(false)
+  const [activeToc, setActiveToc] = useState(0)
 
   const panesRef = useRef<HTMLDivElement | null>(null)
 
@@ -85,9 +98,76 @@ export function App() {
       .catch(() => undefined)
   }, [])
 
+  /**
+   * 实例表是只读文件快照：不在主循环里 4s 轮询（页面闲置时没必要），
+   * 只在页面加载、弹窗打开（4s 轮询）和一次 run 结束后拉。
+   */
+  const loadBridge = useCallback(async () => {
+    try {
+      setBridge(await api.bridgeInstances())
+      setBridgeError(null)
+    } catch (e) {
+      // 401 由 refresh() 的 needToken 流程统一处理，这里不重复报错
+      if (e instanceof ApiError && e.status === 401) {
+        setBridge(null)
+        setBridgeError(null)
+        return
+      }
+      setBridge(null)
+      setBridgeError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
+  /**
+   * 程序列表只在「要选程序」时拉一次。**不跟着 4s 轮询**：
+   * 扫描本身 0.7s，服务端缓存 60s；把它塞进定时器等于让表单每 4 秒重渲染 150 个 option。
+   */
+  const loadPrograms = useCallback(async (refresh = false) => {
+    try {
+      setPrograms(await api.bridgePrograms(refresh))
+      setProgramsError(null)
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        setPrograms(null)
+        setProgramsError(null)
+        return
+      }
+      setPrograms(null)
+      setProgramsError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
   useEffect(() => {
     void refresh()
-  }, [refresh])
+    void loadBridge()
+  }, [refresh, loadBridge])
+
+  // 实例表只在「要看」的时候轮询：桥弹窗 / 运行表单。编辑器只取一次——
+  // 别让 32KB 的编辑器跟着 4s 定时器重渲染。
+  const bridgeLive = showBridge || !!draft
+  useEffect(() => {
+    if (!bridgeLive) return
+    void loadBridge()
+    const timer = setInterval(() => {
+      if (!document.hidden) void loadBridge()
+    }, 4000)
+    return () => clearInterval(timer)
+  }, [bridgeLive, loadBridge])
+
+  const editorOpen = !!editor
+  useEffect(() => {
+    if (!editorOpen) return
+    void loadBridge()
+    // 编辑器里的「快捷方式」输入框要一份 datalist；一次就够，不跟着轮询
+    void loadPrograms()
+  }, [editorOpen, loadBridge, loadPrograms])
+
+  /** 运行表单里只要有一个程序下拉，就确保程序列表已经拉过 */
+  const needsPrograms = !!draft && (draft.snippet.picks ?? []).some((p) => p.kind === 'programs')
+  useEffect(() => {
+    if (!needsPrograms || programs || programsError) return
+    void loadPrograms()
+  }, [needsPrograms, programs, programsError, loadPrograms])
 
   // 队列/桥状态轮询：页面隐藏时停掉，回来立刻刷一次。
   // 间隔跟着运行态走——空闲 4s 足够，跑起来时降到 **500ms**：桥被占用通常 0.3~1s，
@@ -105,14 +185,17 @@ export function App() {
       running ? 500 : 4000,
     )
     const onVisible = () => {
-      if (!document.hidden) void refresh()
+      if (!document.hidden) {
+        void refresh()
+        void loadBridge()
+      }
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => {
       clearInterval(timer)
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [refresh, refreshHealth, running])
+  }, [refresh, refreshHealth, loadBridge, running])
 
   // 运行中的计时
   useEffect(() => {
@@ -173,6 +256,7 @@ export function App() {
       const typing = !!target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)
 
       if (e.key === 'Escape') {
+        if (showBridge) return setShowBridge(false)
         if (editor) return setEditor(null)
         if (historyOpen) return setHistoryOpen(false)
         if (showSettings || needToken) return setShowSettings(false)
@@ -182,6 +266,9 @@ export function App() {
         if (typing) (target as HTMLInputElement).blur()
         return
       }
+
+      // 实例表是只读弹窗：打开期间不让 / T H E N 这些快捷键穿透到后面的片段列表
+      if (showBridge) return
 
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && draft) {
         e.preventDefault()
@@ -268,6 +355,11 @@ export function App() {
     return (usable.find((h) => h.default) ?? usable[0])?.name
   }, [hosts])
 
+  /** 编辑器的槽位 datalist：只在 bridge 快照变化时换引用，避免健康轮询带着编辑器重渲染 */
+  const slots = useMemo(() => bridge?.instances.map((it) => it.slot) ?? [], [bridge])
+  /** 编辑器的快捷方式 datalist：绝对路径（与表单里选中写回的值同一个） */
+  const programValues = useMemo(() => programs?.programs.map((p) => p.value) ?? [], [programs])
+
   function openSnippet(s: SnippetView, confirmed = false, forceForm = false) {
     // 点过的卡片同步成键盘选中项，↑↓ 继续在这一行附近走
     const i = activeIndex.get(s.id)
@@ -342,6 +434,8 @@ export function App() {
           // 徽标的主路径：收到 queued 事件的那一刻服务端 queue 必然 > 0，一刷必中；
           // 收尾（exit/error）也刷一次，把徽标清回去。
           if (ev.type === 'queued' || ev.type === 'exit' || ev.type === 'error') refreshHealth()
+          // close/kill 之后实例表会变：run 结束顺手重拉一次，别等下次开弹窗
+          if (ev.type === 'exit' || ev.type === 'error') void loadBridge()
         },
         openOutput,
       )
@@ -468,6 +562,7 @@ export function App() {
       setShowSettings(false)
       setTokenError(null)
       void refresh()
+      void loadBridge()
     } catch {
       setTokenError('token 不对，或服务端未设置 SNIP_TOKEN')
     }
@@ -518,46 +613,102 @@ export function App() {
   }, [output, running, doneCount, okCount])
 
   return (
-    <div className="app">
-      <Topbar
-        health={health}
-        tokenSet={tokenSet}
-        replayed={!!output?.replayed}
-        onRefresh={() => void refresh()}
-        onNew={() => setEditor({})}
-        onHistory={() => void openHistory()}
-        onSettings={() => {
-          setTokenInput(getToken())
-          setTokenError(null)
-          setShowSettings(true)
+    <div className="site-shell" data-nav-open={navOpen ? 'true' : 'false'}>
+      <Sidebar
+        q={q}
+        onQuery={setQ}
+        onSubmit={() => {
+          if (flat[active]) openSnippet(flat[active]!)
+        }}
+        groups={groups}
+        onNavigate={() => setNavOpen(false)}
+        instanceCount={bridge?.instances.length ?? null}
+        onInstances={() => {
+          setShowBridge(true)
+          setNavOpen(false)
         }}
       />
 
-      <div className="layout">
-        <Sidebar
-          q={q}
-          onQuery={setQ}
-          onSubmit={() => {
-            if (flat[active]) openSnippet(flat[active]!)
+      <div className="site-scrim" aria-hidden="true" onClick={() => setNavOpen(false)} />
+
+      <main className="site-main" id="top">
+        <Topbar
+          health={health}
+          instanceCount={bridge?.instances.length ?? null}
+          tokenSet={tokenSet}
+          replayed={!!output?.replayed}
+          onRefresh={() => void refresh()}
+          onNew={() => setEditor({})}
+          onHistory={() => void openHistory()}
+          onBridge={() => setShowBridge(true)}
+          onSettings={() => {
+            setTokenInput(getToken())
+            setTokenError(null)
+            setShowSettings(true)
           }}
-          groups={groups}
+          onMenu={() => setNavOpen((v) => !v)}
         />
-        <SnippetList
-          q={q}
-          onQuery={setQ}
-          onSubmit={() => {
-            if (flat[active]) openSnippet(flat[active]!)
-          }}
-          groups={groups}
-          activeIndex={activeIndex}
-          active={active}
-          onOpen={(s) => openSnippet(s)}
-          onFan={(s) => openSnippet(s, false, true)}
-          onEdit={(s) => setEditor({ id: s.id })}
-          needToken={needToken}
-          onFillToken={() => setShowSettings(true)}
-        />
-      </div>
+
+        <div className="page-shell">
+          <div className="page-head">
+            <h1 className="page-title">片段</h1>
+            <p className="page-desc">
+              自托管的片段库 + 跨设备执行工作台。选中片段即可运行、编辑或回看历史。
+            </p>
+            <div className="page-meta">
+              <span className="page-meta__item">
+                <svg aria-hidden="true"><use href="#i-layers" /></svg>{flat.length} 个片段
+              </span>
+              <span className="page-meta__item">
+                <svg aria-hidden="true"><use href="#i-database" /></svg>{groups.length} 个分组
+              </span>
+              <span className="page-meta__item">
+                <svg aria-hidden="true"><use href="#i-key-round" /></svg>快捷键可用
+              </span>
+            </div>
+          </div>
+
+          <div className="page-body">
+            <nav className="toc" aria-label="目录">
+              <div className="toc__group">
+                <div className="toc__label">分组</div>
+                {groups.map(([g], i) => (
+                  <a
+                    key={g}
+                    className={`toc__link${activeToc === i ? ' is-active' : ''}`}
+                    href={`#grp-${i}`}
+                    onClick={() => {
+                      setActiveToc(i)
+                      setNavOpen(false)
+                    }}
+                  >
+                    {g}
+                  </a>
+                ))}
+              </div>
+              <div className="toc__foot">共 {flat.length} 个片段</div>
+            </nav>
+
+            <div className="page-content">
+              <SnippetList
+                q={q}
+                onQuery={setQ}
+                onSubmit={() => {
+                  if (flat[active]) openSnippet(flat[active]!)
+                }}
+                groups={groups}
+                activeIndex={activeIndex}
+                active={active}
+                onOpen={(s) => openSnippet(s)}
+                onFan={(s) => openSnippet(s, false, true)}
+                onEdit={(s) => setEditor({ id: s.id })}
+                needToken={needToken}
+                onFillToken={() => setShowSettings(true)}
+              />
+            </div>
+          </div>
+        </div>
+      </main>
 
       {editor && (
         <SnippetEditor
@@ -566,6 +717,8 @@ export function App() {
           snippetId={editor.id}
           hosts={hosts}
           groups={groups.map(([g]) => g)}
+          slots={slots}
+          programValues={programValues}
           onSaved={(message) => {
             setEditor(null)
             setToast(message)
@@ -581,12 +734,18 @@ export function App() {
         <RunFormModal
           draft={draft}
           hosts={hosts}
+          instances={bridge}
+          instancesError={bridgeError}
+          programs={programs}
+          programsError={programsError}
           preview={preview}
           formError={formError}
           onChange={setDraft}
           onError={setFormError}
           onSubmit={submitDraft}
           onPreview={() => void loadPreview()}
+          onReloadInstances={() => void loadBridge()}
+          onReloadPrograms={() => void loadPrograms(true)}
           onClose={() => setDraft(null)}
         />
       )}
@@ -614,10 +773,25 @@ export function App() {
             setTokenInput('')
             setShowSettings(false)
             void refresh()
+            void loadBridge()
           }}
           onSave={() => void saveToken()}
           onClose={() => setShowSettings(false)}
           onHostsChanged={() => void refresh()}
+          onProgramsChanged={() => {
+            // 范围变了，旧列表作废；下次打开表单重扫（服务端也会清掉 60s 缓存）
+            setPrograms(null)
+            setProgramsError(null)
+          }}
+        />
+      )}
+
+      {showBridge && (
+        <BridgeModal
+          data={bridge}
+          error={bridgeError}
+          onRefresh={() => void loadBridge()}
+          onClose={() => setShowBridge(false)}
         />
       )}
 

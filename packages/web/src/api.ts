@@ -6,6 +6,13 @@ export type VarView = {
   required?: boolean
 }
 
+/** 运行表单用：哪些变量该变成实例/程序下拉。服务端从 `run.cmd` 推导，YAML 不改。 */
+export type PickerView =
+  | { kind: 'instances'; mode: 'slot'; vars: { slot: string } }
+  | { kind: 'instances'; mode: 'proN'; vars: { pro: string; n: string } }
+  | { kind: 'instances'; mode: 'pro'; vars: { pro: string } }
+  | { kind: 'programs'; mode: 'file'; vars: { pro: string } }
+
 export type SnippetView = {
   id: string
   title: string
@@ -16,6 +23,8 @@ export type SnippetView = {
   target?: string
   vars: Record<string, VarView>
   steps: number
+  /** 没有可识别的实例槽位时为空/缺省 */
+  picks?: PickerView[]
 }
 
 export type HostView = {
@@ -183,8 +192,116 @@ export type HealthView = {
   quarantined: number
 }
 
-/** `/api/runs` 列表项：档案首行 meta + 末行 summary 的合并视图 */
-export type RunListItem = {
+/** 实例表的一行（P7.1）：只来自 listener 的 instances.txt，手动开的窗口不在其中 */
+export type InstanceView = {
+  slot: string
+  pro: string
+  n: number | null
+  pid: number
+  hwnd: number
+  exe: string
+  ts: string
+  /** true / false = 按 pid 探测；null = 状态不够新，没探测 */
+  alive: boolean | null
+}
+
+export type InstancesView = {
+  target: string
+  bridge: string
+  status: {
+    ts: string
+    ageMs: number | null
+    admin: boolean
+    foreground: string
+    /** listener 自己报告的条数，用来和文件读到的条数对账 */
+    count: number | null
+  }
+  listener: { state: 'fresh' | 'stale' | 'offline' }
+  instances: InstanceView[]
+  watched: { name: string; running: boolean }[]
+  files: { instancesMtimeMs: number; statusMtimeMs: number }
+  error?: string
+}
+
+/* ——— 程序发现（P7.3）——— */
+
+export type ProgramSource =
+  | 'only'
+  | 'progDir'
+  | 'extra'
+  | 'userMenu'
+  | 'userDesktop'
+  | 'commonMenu'
+  | 'commonDesktop'
+
+export const PROGRAM_SOURCE_LABEL: Record<ProgramSource, string> = {
+  only: '指定列表',
+  progDir: 'PROG_DIR',
+  extra: '额外目录',
+  userMenu: '开始菜单',
+  userDesktop: '桌面',
+  commonMenu: '公共开始菜单',
+  commonDesktop: '公共桌面',
+}
+
+export type ProgramView = {
+  name: string
+  /** 写进 `{{pro}}` 的值：.lnk 的绝对路径（便携 exe 是服务端生成的包装） */
+  value: string
+  /** 原始文件：.lnk 就是它自己，便携 exe 是那个 .exe */
+  path: string
+  dir: string
+  source: ProgramSource
+  target: string
+  args: string
+  /** exe = 便携程序（值指向生成的 .lnk 包装） */
+  kind: 'lnk' | 'exe'
+  /** listener 会用的实例槽位名 */
+  pro: string
+}
+
+export type FilteredProgramView = {
+  name: string
+  path: string
+  source: ProgramSource
+  reason:
+    | 'broken'
+    | 'dir'
+    | 'msi'
+    | 'uwp'
+    | 'uninstall'
+    | 'installer'
+    | 'help'
+    | 'system'
+    | 'duplicate'
+}
+
+export type ProgramsConfigView = {
+  config: { only: string[]; extraRoots: string[]; include: string[] }
+  file: string
+  exists: boolean
+  problems: string[]
+}
+
+export type ProgramsView = {
+  programs: ProgramView[]
+  filtered: FilteredProgramView[]
+  total: number
+  truncated: number
+  progDir: string
+  /** 便携 exe 的 .lnk 包装目录 */
+  wrapDir: string
+  roots: { source: string; path: string; count: number }[]
+  mode: 'only' | 'discover'
+  scannedAt: number
+  cacheAgeMs: number
+  config: ProgramsConfigView['config']
+  configFile: string
+  notes: string[]
+  error?: string
+}
+
+/** `/api/runs` 列表项：档案首行 meta + 末行 summary 的合并视图 */export type RunListItem = {
   runId: string
   snippetId: string
   title?: string
@@ -335,6 +452,20 @@ export const api = {
   }) => req<BridgeSettingsView>('/api/settings', { method: 'PUT', body: JSON.stringify(input) }),
   clearSettings: () => req<BridgeSettingsView>('/api/settings', { method: 'DELETE' }),
   health: () => req<HealthView>('/api/health'),
+  /** 桥的只读数据：直接读 instances.txt / status.txt，不走 command.txt */
+  bridgeInstances: (target?: string) =>
+    req<InstancesView>(
+      `/api/bridge/instances${target ? `?target=${encodeURIComponent(target)}` : ''}`,
+    ),
+  /** 程序列表：扫服务端本机的 .lnk（不经过桥）。扫描有 60s 缓存，refresh 强制重扫 */
+  bridgePrograms: (refresh = false) =>
+    req<ProgramsView>(`/api/bridge/programs${refresh ? '?refresh=1' : ''}`),
+  programsConfig: () => req<ProgramsConfigView>('/api/bridge/programs/config'),
+  saveProgramsConfig: (input: { only: string[]; extraRoots: string[]; include: string[] }) =>
+    req<ProgramsConfigView>('/api/bridge/programs/config', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
   /** 编辑用：完整字段 + mtime（列表里的 SnippetView 只有摘要） */
   snippetDetail: (id: string) =>
     req<SnippetDetail>(`/api/snippets/${encodeURIComponent(id)}/detail`),
