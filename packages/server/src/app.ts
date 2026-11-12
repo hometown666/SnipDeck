@@ -8,6 +8,7 @@ import {
   SnippetStore,
   SnippetWriteError,
   deleteSnippet,
+  detectPickers,
   draftOf,
   deleteHost,
   groupOf,
@@ -26,6 +27,7 @@ import {
   type HostDraft,
   type Hosts,
   type HostTarget,
+  type ProgramsConfig,
   type RunEvent,
   type RunMeta,
   type RunPaneResult,
@@ -35,6 +37,16 @@ import {
   type VarSpec,
 } from '@snipdeck/core'
 import { createDriver, ExecDriver } from '@snipdeck/drivers'
+import { BridgeDataError, readInstancesSnapshot, resolveBridgeTarget } from './bridge-data'
+import {
+  clearProgramsCache,
+  getPrograms,
+  loadProgramsConfig,
+  normalizeProgramsBody,
+  programsConfigPath,
+  ProgramsError,
+  writeProgramsConfig,
+} from './programs'
 import { isKnownShell, knownShells, SessionManager } from './sessions'
 import {
   countLnks,
@@ -470,6 +482,8 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
         maxFiles: bridgeSettings.runsMaxFiles,
       })
       runs.prune()
+      // PROG_DIR 变了，程序列表的扫描范围跟着变；缓存留着会显示上一个目录的内容
+      clearProgramsCache()
     } catch (e) {
       if (e instanceof SettingsError) {
         return reply.code(400).send({ error: e.message, problems: e.problems })
@@ -483,13 +497,75 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
   app.delete('/api/settings', async () => {
     bridgeSettings = saveSettings(settingsFile, { ...EMPTY_SETTINGS })
     runs.setLimits({ ttlDays: 0, maxFiles: 0 })
+    clearProgramsCache()
     return settingsView()
+  })
+
+  // ——— 桥的只读数据（P7.1）———
+  //
+  // **直接读文件，不写 command.txt。** 读实例表如果走 `ahk.bat instances`，
+  // 会和用户命令、健康检查抢同一条单车道；listener 不在线时还会失败。
+  // 文件本身是 listener 原子替换写的，读到的要么是旧的一份、要么是新的一份。
+  app.get<{ Querystring: { target?: string } }>('/api/bridge/instances', async (req, reply) => {
+    const raw = req.query.target
+    if (raw !== undefined && typeof raw !== 'string') {
+      return reply.code(400).send({ error: 'target 只能是单个字符串' })
+    }
+    try {
+      const { name, bridge } = resolveBridgeTarget(hosts, raw)
+      const snapshot = await readInstancesSnapshot(bridge)
+      return { target: name, bridge, ...snapshot }
+    } catch (e) {
+      if (e instanceof BridgeDataError) {
+        return reply.code(e.statusCode).send({ error: e.message })
+      }
+      throw e
+    }
+  })
+
+  // ——— 程序发现（P7.3）———
+  //
+  // 和实例表一样是**只读**：扫 .lnk 不碰 command.txt、不进队列。
+  // 区别是它连桥都不需要——扫的是服务端本机的文件系统，所以不收 target 参数。
+  app.get<{ Querystring: { refresh?: string } }>('/api/bridge/programs', async (req, reply) => {
+    try {
+      return await getPrograms({
+        progDir: bridgeSettings.progDir,
+        configFile: programsConfigPath(dataDir),
+        wrapDir: resolve(dataDir, 'program-links'),
+        force: req.query.refresh === '1',
+      })
+    } catch (e) {
+      if (e instanceof ProgramsError) return reply.code(e.statusCode).send({ error: e.message })
+      throw e
+    }
+  })
+
+  app.get('/api/bridge/programs/config', async () =>
+    loadProgramsConfig(programsConfigPath(dataDir)),
+  )
+
+  app.put<{ Body: Partial<ProgramsConfig> }>('/api/bridge/programs/config', async (req, reply) => {
+    const body = req.body ?? {}
+    const { config, problems } = normalizeProgramsBody({
+      only: body.only,
+      extraRoots: body.extraRoots,
+      include: body.include,
+    })
+    if (problems.length > 0) return reply.code(400).send({ error: problems.join('；') })
+    try {
+      const view = writeProgramsConfig(programsConfigPath(dataDir), config)
+      clearProgramsCache()
+      return view
+    } catch (e) {
+      if (e instanceof ProgramsError) return reply.code(e.statusCode).send({ error: e.message })
+      throw e
+    }
   })
 
   app.post<{
     Body: { id: string; vars?: Record<string, string>; target?: string; targets?: string[]; confirm?: boolean }
-  }>('/api/run', async (req, reply) => {
-    const { id, vars, target: single, targets: many, confirm } = req.body ?? {}
+  }>('/api/run', async (req, reply) => {    const { id, vars, target: single, targets: many, confirm } = req.body ?? {}
     const snippet = store.get(id)
     if (!snippet) return reply.code(404).send({ error: `snippet not found: ${id}` })
     if (snippet.danger && !confirm) {
@@ -786,6 +862,7 @@ function sendWriteError(reply: FastifyReply, e: unknown) {
 }
 
 function publicView(s: Snippet, snippetsDir: string) {
+  const picks = detectPickers(s)
   return {
     id: s.id,
     title: s.title ?? s.id,
@@ -795,6 +872,9 @@ function publicView(s: Snippet, snippetsDir: string) {
     shell: s.shell,
     target: s.target,
     steps: s.steps.length,
+    // 运行表单用：哪些变量该变成「实例下拉」。只做提示，YAML 与命令都不动。
+    // 没有可识别的槽位就不带这个键，省得每个老片段都多一个空数组。
+    ...(picks.length > 0 ? { picks } : {}),
     vars: Object.fromEntries(
       Object.entries(s.vars ?? {}).map(([k, v]) => [
         k,

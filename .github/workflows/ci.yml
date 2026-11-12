@@ -59,6 +59,15 @@ jobs:
       - name: expect（三源 / 编码 / 正则预算）
         run: npm run test:expect
 
+      - name: 桥文件解析（instances / status / UTF-16 / 排序）
+        run: npm run test:bridge
+
+      - name: 实例下拉识别（命令形态 / admin 前缀 / 冲突放弃）
+        run: npm run test:picks
+
+      - name: 程序发现（分类 / 去重 / include / 配置归一）
+        run: npm run test:programs
+
       - name: 历史导入（清洗 / 残句 / 危险标记）
         run: npm run test:import
 
@@ -68,7 +77,7 @@ jobs:
       - name: API 冒烟（真实路由 + 无桥降级路径）
         # CI 上没有 listener。用 SNIPDECK_SMOKE_BRIDGE 指一个不存在的目录，
         # 冒烟会走「bridgeUp=false → 跳过 /api/run 实跑」那条分支，
-        # 其余 111 条（鉴权 / 404 / 脱敏 / CRUD / 设置）照样打真路由。
+        # 其余 171 条（鉴权 / 404 / 脱敏 / CRUD / 设置 / 实例表 / 程序列表）照样打真路由。
         run: npm run smoke --workspace @snipdeck/server
         env:
           SNIPDECK_SMOKE_BRIDGE: 'C:\no-such-bridge'

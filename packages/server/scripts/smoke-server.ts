@@ -6,7 +6,7 @@
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildApp } from '../src/app'
 
@@ -20,6 +20,149 @@ const TOKEN = 'smoke-token'
 // 本机不设这个变量，照旧打真桥。
 const BRIDGE = process.env.SNIPDECK_SMOKE_BRIDGE ?? 'C:\\ahk_trigger'
 const BRIDGE_YAML = BRIDGE.replace(/\\/g, '\\\\')
+
+// P7.1 夹具：一个「有实例」的桥目录 + 一个「目录在但文件不在」的桥目录。
+// 不碰默认目标，所以 health / run 仍按无桥路径跑。
+const BRIDGE_FIXTURE = join(FIXTURE, 'bridge-fixture')
+const BRIDGE_EMPTY = join(FIXTURE, 'bridge-empty')
+mkdirSync(BRIDGE_FIXTURE, { recursive: true })
+mkdirSync(BRIDGE_EMPTY, { recursive: true })
+
+function localTs(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+/** listener 写的是 UTF-16 LE + BOM；夹具必须同编码，否则测不到 decodeText 那条路 */
+function writeUtf16(file: string, text: string): void {
+  writeFileSync(file, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]))
+}
+
+writeUtf16(
+  join(BRIDGE_FIXTURE, 'instances.txt'),
+  [
+    '# slot|pid|hwnd|exe|pro|ts',
+    'wechat#1|999999|5678|WeChat.exe|wechat|2026-11-10 02:00:00',
+    '微信#2|999998|6789|WeChat.exe|微信',
+    '',
+  ].join('\r\n'),
+)
+writeUtf16(
+  join(BRIDGE_FIXTURE, 'status.txt'),
+  [
+    `ts=${localTs()}`,
+    'listener=ok',
+    'admin=1',
+    'last=OK|2026-11-10 02:16:24|shell|open|pid=34580 slot=shell#1',
+    'foreground=WorkBuddy',
+    'Cursor=stopped',
+    'Weixin=running',
+    'instances=2',
+    'inst.wechat#1=pid=999999 hwnd=5678 exe=WeChat.exe',
+    'inst.微信#2=pid=999998 hwnd=6789 exe=WeChat.exe',
+    '',
+  ].join('\r\n'),
+)
+
+// P7.3 夹具：程序扫描的结果。
+// 真扫描要跑 PowerShell + 读开始菜单，CI 上完全不可控（runner 装了什么谁也不知道），
+// 所以这里把「扫描器交上来的行」当成固定输入，只验分类 / 接口 / only / include。
+const PROG_DIR_FIXTURE = join(FIXTURE, '程序')
+mkdirSync(PROG_DIR_FIXTURE, { recursive: true })
+const LNK_WECHAT = join(PROG_DIR_FIXTURE, 'WeChat.lnk')
+const LNK_WEIXIN = join(PROG_DIR_FIXTURE, '微信.lnk')
+const LNK_CMD_IN_PROG = join(PROG_DIR_FIXTURE, 'cmd.lnk')
+const LNK_CMD_IN_MENU = join(FIXTURE, 'menu', 'Command Prompt.lnk')
+const LNK_UNINSTALL = join(FIXTURE, 'menu', 'Uninstall Foo.lnk')
+const LNK_BROKEN = join(FIXTURE, 'menu', 'Broken.lnk')
+// 只有体检「文件在不在」这一步需要真实文件；内容无所谓，不解析
+for (const f of [LNK_WECHAT, LNK_WEIXIN, LNK_CMD_IN_PROG, LNK_CMD_IN_MENU, LNK_UNINSTALL, LNK_BROKEN]) {
+  writeFixture(relative(FIXTURE, f), '')
+}
+const PROGRAMS_FIXTURE = join(FIXTURE, 'programs-scan.json')
+writeFileSync(
+  PROGRAMS_FIXTURE,
+  JSON.stringify({
+    roots: [{ source: 'progDir', path: PROG_DIR_FIXTURE, count: 3 }],
+    items: [
+      {
+        path: LNK_WECHAT,
+        name: 'WeChat',
+        dir: PROG_DIR_FIXTURE,
+        source: 'progDir',
+        target: 'C:\\Program Files\\Tencent\\WeChat\\WeChat.exe',
+        args: '',
+      },
+      {
+        path: LNK_WEIXIN,
+        name: '微信',
+        dir: PROG_DIR_FIXTURE,
+        source: 'progDir',
+        target: 'C:\\Program Files\\Tencent\\Weixin\\Weixin.exe',
+        args: '',
+      },
+      {
+        path: LNK_CMD_IN_PROG,
+        name: 'cmd',
+        dir: PROG_DIR_FIXTURE,
+        source: 'progDir',
+        target: 'C:\\Windows\\System32\\cmd.exe',
+        args: '',
+      },
+      {
+        path: LNK_CMD_IN_MENU,
+        name: 'Command Prompt',
+        dir: join(FIXTURE, 'menu'),
+        source: 'commonMenu',
+        // 刻意和 progDir 里的 cmd 用不同的 target：否则会被去重吃掉，
+        // 测的就不是「include 能不能把系统工具放回来」了
+        target: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+        args: '',
+      },
+      {
+        path: LNK_UNINSTALL,
+        name: 'Uninstall Foo',
+        dir: join(FIXTURE, 'menu'),
+        source: 'commonMenu',
+        target: 'C:\\Program Files\\Foo\\unins000.exe',
+        args: '',
+      },
+      {
+        path: LNK_BROKEN,
+        name: 'Broken',
+        dir: join(FIXTURE, 'menu'),
+        source: 'commonMenu',
+        target: '',
+        args: '',
+      },
+      // 便携 exe：launch 直接给定，避免 CI 里去跑 COM 生成快捷方式（生成链路另有真机验收）
+      {
+        path: join(PROG_DIR_FIXTURE, 'PortableTool.exe'),
+        name: 'PortableTool',
+        dir: PROG_DIR_FIXTURE,
+        source: 'extra',
+        target: '',
+        args: '',
+        kind: 'exe',
+        launch: join(FIXTURE, 'wrap', 'PortableTool.lnk'),
+      },
+      // 安装器：即使目录被信任也不该出现在列表里
+      {
+        path: join(PROG_DIR_FIXTURE, 'setup.exe'),
+        name: 'setup',
+        dir: PROG_DIR_FIXTURE,
+        source: 'extra',
+        target: '',
+        args: '',
+        kind: 'exe',
+      },
+    ],
+  }),
+  'utf8',
+)
+// 只对「本进程」生效：扫描器看到这个变量就不碰本机开始菜单
+process.env.SNIPDECK_PROGRAMS_FIXTURE = PROGRAMS_FIXTURE
+
 
 function writeFixture(rel: string, content: string): void {
   const file = join(FIXTURE, rel)
@@ -54,6 +197,49 @@ writeFixture(
     'legacy-reserved:',
     '  driver: local',
     '  reserved: true',
+    'smoke-bridge:',
+    '  driver: exec',
+    '  shell: cmd',
+    `  bridge: ${JSON.stringify(BRIDGE_FIXTURE)}`,
+    '  timeout: 20',
+    'smoke-empty:',
+    '  driver: exec',
+    '  shell: cmd',
+    `  bridge: ${JSON.stringify(BRIDGE_EMPTY)}`,
+    '  timeout: 20',
+    'smoke-missing:',
+    '  driver: exec',
+    '  shell: cmd',
+    `  bridge: ${JSON.stringify(join(FIXTURE, 'no-such-bridge'))}`,
+    '  timeout: 20',
+    '',
+  ].join('\n'),
+)
+writeFixture(
+  'snippets/实例控制/pick-demo.yaml',
+  [
+    'id: pick-demo',
+    'title: 实例下拉',
+    'target: win-desktop',
+    'vars:',
+    '  admin: { prompt: 提权, choices: ["", "admin"], default: "" }',
+    '  pro: { prompt: 程序, default: wechat }',
+    '  n: { prompt: 实例号, default: 1 }',
+    'steps:',
+    "  - { do: run, cmd: 'call C:\\ahk_trigger\\ahk.bat {{admin}} kill {{pro}}#{{n}}' }",
+    '',
+  ].join('\n'),
+)
+writeFixture(
+  'snippets/程序启动/lnk-demo.yaml',
+  [
+    'id: lnk-demo',
+    'title: 程序下拉',
+    'target: win-desktop',
+    'vars:',
+    '  pro: { prompt: 程序, default: wechat }',
+    'steps:',
+    "  - { do: run, cmd: 'call C:\\ahk_trigger\\ahk.bat lnk \"{{pro}}\"' }",
     '',
   ].join('\n'),
 )
@@ -256,6 +442,177 @@ check('GET /api/health → 200', h.statusCode === 200)
 check('health.ok === true', hb.ok === true)
 check('health.bridgeUp 是布尔值', typeof hb.bridgeUp === 'boolean', JSON.stringify(hb))
 check('health.quarantined = 1', hb.quarantined === 1, JSON.stringify(hb))
+
+// 2.1 桥的只读数据（P7.1）：直接读实例表，不写 command.txt
+const bi = await app.inject({
+  method: 'GET',
+  url: '/api/bridge/instances?target=smoke-bridge',
+  headers: auth,
+})
+const bib = bi.json()
+check('GET /api/bridge/instances → 200', bi.statusCode === 200, bi.body)
+check('实例 2 条', bib.instances?.length === 2, JSON.stringify(bib.instances))
+check(
+  'UTF-16 中文 pro 读得出来',
+  bib.instances?.some((x: { slot: string; pro: string }) => x.slot === '微信#2' && x.pro === '微信'),
+  JSON.stringify(bib.instances),
+)
+check('listener fresh', bib.listener?.state === 'fresh', JSON.stringify(bib.listener))
+check(
+  'admin / foreground 透传',
+  bib.status?.admin === true && bib.status?.foreground === 'WorkBuddy',
+  JSON.stringify(bib.status),
+)
+check(
+  'pid 已退 → alive=false',
+  bib.instances?.find((x: { slot: string }) => x.slot === 'wechat#1')?.alive === false,
+  JSON.stringify(bib.instances),
+)
+check('读实例表没有写 command.txt', !existsSync(join(BRIDGE_FIXTURE, 'command.txt')))
+
+const biEmpty = await app.inject({
+  method: 'GET',
+  url: '/api/bridge/instances?target=smoke-empty',
+  headers: auth,
+})
+const bie = biEmpty.json()
+check('缺文件仍 200（不是 500）', biEmpty.statusCode === 200, String(biEmpty.statusCode))
+check(
+  '缺文件时 error 说清楚',
+  typeof bie.error === 'string' && bie.error.includes('instances.txt'),
+  JSON.stringify(bie.error),
+)
+check(
+  '缺文件时实例为空、listener offline',
+  bie.instances?.length === 0 && bie.listener?.state === 'offline',
+  JSON.stringify(bie),
+)
+
+const biReserved = await app.inject({
+  method: 'GET',
+  url: '/api/bridge/instances?target=legacy-reserved',
+  headers: auth,
+})
+check('reserved 目标 → 400', biReserved.statusCode === 400, String(biReserved.statusCode))
+const biUnknown = await app.inject({
+  method: 'GET',
+  url: '/api/bridge/instances?target=nope',
+  headers: auth,
+})
+check('未知目标 → 400', biUnknown.statusCode === 400, String(biUnknown.statusCode))
+
+const biMissingDir = await app.inject({
+  method: 'GET',
+  url: '/api/bridge/instances?target=smoke-missing',
+  headers: auth,
+})
+check(
+  'bridge 目录不存在 → 400 且说清楚',
+  biMissingDir.statusCode === 400 && String(biMissingDir.body).includes('bridge 目录不存在'),
+  `${biMissingDir.statusCode} ${biMissingDir.body}`,
+)
+
+const biDup = await app.inject({
+  method: 'GET',
+  url: '/api/bridge/instances?target=smoke-bridge&target=smoke-empty',
+  headers: auth,
+})
+check('重复 target → 400（不静默挑一个）', biDup.statusCode === 400, `${biDup.statusCode} ${biDup.body}`)
+
+// 2.6 程序发现（P7.3）
+const pg = await app.inject({ method: 'GET', url: '/api/bridge/programs', headers: auth })
+const pgv = pg.json()
+check('程序列表 → 200', pg.statusCode === 200, pg.body.slice(0, 200))
+check('扫到 8 条', pgv.total === 8, String(pgv.total))
+check(
+  '保留 4 条（两条 progDir + 一条中文 + 一条便携 exe）',
+  pgv.programs?.length === 4,
+  JSON.stringify(pgv.programs?.map((p: { name: string }) => p.name)),
+)
+check(
+  'PROG_DIR 里的 cmd 不套黑名单',
+  pgv.programs?.some((p: { name: string }) => p.name === 'cmd'),
+  JSON.stringify(pgv.programs?.map((p: { name: string }) => p.name)),
+)
+check(
+  '中文程序名原样带回',
+  pgv.programs?.some((p: { name: string }) => p.name === '微信'),
+  JSON.stringify(pgv.programs?.map((p: { name: string }) => p.name)),
+)
+const reasons = new Set((pgv.filtered ?? []).map((f: { reason: string }) => f.reason))
+check(
+  '过滤原因含 system / uninstall / broken / installer',
+  ['system', 'uninstall', 'broken', 'installer'].every((r) => reasons.has(r)),
+  JSON.stringify([...reasons]),
+)
+const portable = (pgv.programs ?? []).find((p: { name: string }) => p.name === 'PortableTool')
+check(
+  '便携 exe 的值是生成的 .lnk（不是裸 exe）',
+  !!portable && portable.kind === 'exe' && /\.lnk$/i.test(portable.value),
+  JSON.stringify(portable),
+)
+check(
+  '便携 exe 仍保留原 exe 路径',
+  !!portable && /\.exe$/i.test(portable.path),
+  JSON.stringify(portable?.path),
+)
+check(
+  '每个程序都带绝对路径当值',
+  (pgv.programs ?? []).every((p: { value: string }) => /^[A-Za-z]:\\/.test(p.value)),
+  JSON.stringify(pgv.programs?.map((p: { value: string }) => p.value)),
+)
+check('mode = discover', pgv.mode === 'discover', String(pgv.mode))
+check('没有写 command.txt（读列表不该占用串行队列）', !existsSync(join(BRIDGE_FIXTURE, 'command.txt')))
+
+const pgCfg = await app.inject({ method: 'GET', url: '/api/bridge/programs/config', headers: auth })
+check('程序配置 → 200 且默认空', pgCfg.statusCode === 200 && pgCfg.json().config.only.length === 0, pgCfg.body)
+
+const pgBad = await app.inject({
+  method: 'PUT',
+  url: '/api/bridge/programs/config',
+  headers: auth,
+  payload: { only: ['C:\\definitely\\missing.lnk'] },
+})
+check(
+  'only 写了不存在的路径 → 400 且说清楚',
+  pgBad.statusCode === 400 && String(pgBad.body).includes('不存在'),
+  `${pgBad.statusCode} ${pgBad.body}`,
+)
+
+const pgOnly = await app.inject({
+  method: 'PUT',
+  url: '/api/bridge/programs/config',
+  headers: auth,
+  payload: { only: [LNK_WECHAT] },
+})
+check('only 合法路径 → 200', pgOnly.statusCode === 200, pgOnly.body)
+const pgOnlyList = await app.inject({ method: 'GET', url: '/api/bridge/programs', headers: auth })
+const pgo = pgOnlyList.json()
+check('only 模式生效', pgo.mode === 'only', String(pgo.mode))
+check('only 只剩点名的 1 条', pgo.programs?.length === 1, String(pgo.programs?.length))
+check('only 的条目来源标成「指定列表」', pgo.programs?.[0]?.source === 'only', pgo.programs?.[0]?.source)
+
+const pgInclude = await app.inject({
+  method: 'PUT',
+  url: '/api/bridge/programs/config',
+  headers: auth,
+  payload: { only: [], include: [LNK_CMD_IN_MENU] },
+})
+check('include 合法 → 200', pgInclude.statusCode === 200, pgInclude.body)
+const pgIncList = (await app.inject({ method: 'GET', url: '/api/bridge/programs', headers: auth })).json()
+check('include 让被挡的系统工具出现', pgIncList.programs?.length === 5, String(pgIncList.programs?.length))
+check(
+  'include 后仍是过滤列表少一条',
+  pgIncList.filtered?.length === 3,
+  String(pgIncList.filtered?.length),
+)
+await app.inject({
+  method: 'PUT',
+  url: '/api/bridge/programs/config',
+  headers: auth,
+  payload: { only: [], include: [] },
+})
+
 // 3. 列表与单个
 const list = (await app.inject({ method: 'GET', url: '/api/snippets', headers: auth })).json()
 // 数量断言不写死：加一条 fixture 就会红。真正要钉的是「health 与列表说的是同一件事」
@@ -263,6 +620,24 @@ check('health.snippets 与列表长度一致', hb.snippets === list.length, `${h
 check('列表含 click-instance', list.some((s: { id: string }) => s.id === 'click-instance'))
 check('kill-demo 标记 danger', list.find((s: { id: string }) => s.id === 'kill-demo')?.danger === true)
 check('列表不泄漏文件路径', list.every((s: Record<string, unknown>) => !('file' in s)))
+const pickDemo = list.find((s: { id: string }) => s.id === 'pick-demo')
+check(
+  'pick-demo 带 proN 实例下拉',
+  JSON.stringify(pickDemo?.picks) ===
+    JSON.stringify([{ kind: 'instances', mode: 'proN', vars: { pro: 'pro', n: 'n' } }]),
+  JSON.stringify(pickDemo?.picks),
+)
+check(
+  '普通片段没有实例下拉',
+  !list.find((s: { id: string }) => s.id === 'check-instence')?.picks,
+)
+const lnkDemo = list.find((s: { id: string }) => s.id === 'lnk-demo')
+check(
+  'lnk-demo 带程序下拉（kind=programs）',
+  JSON.stringify(lnkDemo?.picks) ===
+    JSON.stringify([{ kind: 'programs', mode: 'file', vars: { pro: 'pro' } }]),
+  JSON.stringify(lnkDemo?.picks),
+)
 const nf = await app.inject({ method: 'GET', url: '/api/snippets/no-such', headers: auth })
 check('不存在的 id → 404', nf.statusCode === 404)
 
