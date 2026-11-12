@@ -178,7 +178,9 @@ function reportDir(label, value, whenEmpty, lnk) {
   ok(label, value)
 }
 
-reportDir('PROG_DIR', bridgeSettings.progDir, '桥用默认（桌面）', true)
+// 空值的含义是「不注入」，桥回落到它自己脚本里的默认值——那个值服务端看不到，
+// 所以这里不能替它说「桌面」（本机已装的那份就写死成 D:\Users\Desktop\程序）
+reportDir('PROG_DIR', bridgeSettings.progDir, '未注入，桥用它自己的默认值（服务端看不到是哪个目录）', true)
 reportDir('AHK_DIR', bridgeSettings.ahkDir, 'script: 子命令会报错', false)
 
 // 5. launchers

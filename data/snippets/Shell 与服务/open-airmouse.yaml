@@ -1,14 +1,17 @@
 id: open-airmouse
 title: 打开 airmouse（提权）
-group: 程序启动
+group: Shell 与服务
 target: win-desktop
 shell: cmd
-tags: [gui, launch, admin]
+tags:
+  - gui
+  - launch
+  - admin
 danger: true
 meta:
   source: termius-command
   note: 提权窗口要做 click/focus 时，listener 自身也必须是管理员
 steps:
   - do: run
-    cmd: 'call C:\ahk_trigger\ahk.bat admin lnk Airmouse'
+    cmd: call C:\ahk_trigger\ahk.bat admin lnk Airmouse
     timeout: 30

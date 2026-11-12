@@ -151,7 +151,7 @@ async function drive(width, height, label) {
         const rows = document.querySelectorAll('.run-row')
         if (rows.length > 0) return { rows: rows.length, first: rows[0].textContent.trim() }
         // 「读取中…」也是 .empty：只有读到确定的结论（没有记录/出错）才提前返回
-        const em = document.querySelector('.history-modal .empty')
+        const em = document.querySelector('.modal.history .empty')
         if (em && !em.textContent.includes('读取中')) return { rows: 0, empty: em.textContent.trim() }
         await new Promise((r) => setTimeout(r, 100))
       }

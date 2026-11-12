@@ -1,0 +1,19 @@
+id: run-comfyui
+title: 跑 comfyui
+group: Shell 与服务
+target: win-desktop
+shell: cmd
+tags:
+  - shell
+  - python
+vars:
+  n:
+    prompt: 壳编号
+    default: "1"
+    choices:
+      - "1"
+      - "2"
+      - "3"
+steps:
+  - do: run
+    cmd: call C:\ahk_trigger\ahk.bat shell shell#{{n}} "cd D:\试炼之地\ComfyUI\ComfyUI && run_lowvram.bat"

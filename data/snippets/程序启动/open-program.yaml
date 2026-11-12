@@ -1,15 +1,19 @@
 id: open-program
-title: 启动程序（按快捷方式名）
+title: 启动程序（快捷方式）
 group: 程序启动
 target: win-desktop
 shell: cmd
-tags: [gui, launch]
+tags:
+  - gui
+  - launch
 meta:
   source: termius-command
-  note: '对应 %PROG_DIR%\<名>.lnk；PROG_DIR 由 ahk.bat 内部默认值决定'
+  note: 表单里可以直接从发现到的程序里选（写绝对路径，不依赖 PROG_DIR）；也可以手输 PROG_DIR 里的名字
 vars:
-  pro: { prompt: 程序名, default: wechat }
+  pro:
+    prompt: 程序
+    default: wechat
 steps:
   - do: run
-    cmd: 'call C:\ahk_trigger\ahk.bat lnk {{pro}}'
+    cmd: call C:\ahk_trigger\ahk.bat lnk "{{pro}}"
     timeout: 30

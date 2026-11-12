@@ -32,7 +32,16 @@ const nodeGlobals = {
 
 export default [
   {
-    ignores: ['**/dist/**', '**/node_modules/**', 'data/**', '**/*.d.ts', 'coverage/**'],
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      'data/**',
+      // 本地备份是旧代码副本，不是当前工程；vendor 是第三方 UI 组件库（含压缩产物）
+      'backup/**',
+      'packages/web/src/vendor/**',
+      '**/*.d.ts',
+      'coverage/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
