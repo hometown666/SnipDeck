@@ -1,4 +1,7 @@
 export * from './types'
+export * from './bridge-files'
+export * from './picks'
+export * from './programs'
 export * from './yaml'
 export * from './vars'
 export * from './snippets'

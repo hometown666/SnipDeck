@@ -74,6 +74,31 @@ export type HostTarget = {
   [key: string]: unknown
 }
 
+/**
+ * `instances.txt` 的一行：listener 已经把 slot / pid / hwnd / exe / pro / ts 绑好。
+ * `n` 是从 slot 末尾解析出的实例号（`wechat#12` → 12），解析失败为 null。
+ */
+export type InstanceRow = {
+  slot: string
+  pid: number
+  hwnd: number
+  exe: string
+  pro: string
+  ts: string
+  n: number | null
+}
+
+/** `status.txt` 解析结果。`watched` 是 listener 里写死的那些探测项，不是程序目录。 */
+export type StatusFile = {
+  ts: string
+  listener: boolean
+  admin: boolean
+  last: string
+  foreground: string
+  instancesCount: number | null
+  watched: { name: string; running: boolean }[]
+}
+
 export type RunRequest = {
   shell: string
   cmd: string

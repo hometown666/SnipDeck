@@ -15,6 +15,9 @@
     "typecheck": "tsc --noEmit",
     "test:search": "tsx scripts/test-search.mts",
     "test:expect": "tsx scripts/test-expect.mts",
-    "test:import": "tsx scripts/test-import.mts"
+    "test:import": "tsx scripts/test-import.mts",
+    "test:bridge": "tsx scripts/test-bridge-files.mts",
+    "test:picks": "tsx scripts/test-picks.mts",
+    "test:programs": "tsx scripts/test-programs.mts"
   }
 }
