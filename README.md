@@ -129,12 +129,18 @@ npm run dev:server                                            # 本机：http://
    # 不想换 token 就去掉 -Rotate；-Show 只查看不改写
    ```
    这条脚本写 `.env` 的 `SNIP_TOKEN` / `SNIPDECK_HOST`（保留注释与 `SNIPDECK_PORT`），并在末尾打印出新 token。改完**重启服务**让它绑 `127.0.0.1`。
-2. TLS 终结（在装了 tailscale 的机器上一次）：
+2. TLS 终结（在装了 tailscale 的机器上一次，**用管理员终端**）：
    ```bash
-   tailscale serve https / https://<machine>.ts.net
+   tailscale serve --bg 7878
    ```
-   自动把 `https://<machine>.ts.net` 转发到本机 `http://127.0.0.1:7878`。
-3. **切流**：先确认手机走 `https://<machine>.ts.net` 能拿页面、`wss` 通，再弃用旧的明文 `http://100.x:7878`。
+   默认即 HTTPS（443），自动把 `https://<机器名>.ts.net` 转发到本机 `http://127.0.0.1:7878`，证书 Tailscale 托管。
+   > ⚠️ `tailscale serve` 新语法（1.52+）里 `https` 是 `--https=<port>` **标志**而非子命令；写 `tailscale serve https 7878` 会报 `invalid argument format`。端口转发类 serve 在 Windows 不需要管理员，若报权限错再开管理员终端重跑。`--bg` 让它后台常驻（关终端不失效）。
+3. **本机先验证**（绕开你机器上的 HTTP_PROXY；PowerShell 里 `curl` 是 `Invoke-WebRequest` 别名，必须写 `curl.exe`）：
+   ```powershell
+   curl.exe --noproxy '*' -sI https://<机器名>.ts.net/
+   # 期望 HTTP/2 200；证书由 Tailscale CA 签发，本机 curl 默认可信
+   ```
+   再**手机切流**：确认走 `https://<机器名>.ts.net` 能拿页面、`wss` 通，旧的明文 `http://100.x:7878` 已自然失效（服务只绑 127.0.0.1）。
 4. **扫码配对**：打开网页 ⚙，设置弹窗里有「配对二维码」——它把 `https://<本机地址>/?token=<token>` 编成图，手机扫一下直接带 token 进，免手填。也支持直接发带 `?token=` 的链接（前端入口会自动写入 localStorage 后把 token 从地址栏抹掉）。
    > 服务退回 `127.0.0.1` 后，启动守卫不再要求 token（守卫只拦「非 loopback 且无 token」）；此时安全来自「serve 这一层」+ 共享 token 双层。**绝不对公网做端口映射**——WS 的 token 走 query，会进 serve 的访问日志，靠 tailnet 私有网络 + token 纵深缓解。
 
