@@ -22,8 +22,11 @@
 - **单车道队列**：`command.txt` 只能一条一条来，走桥的命令严格 FIFO，前端会显示排队时长
 - **网页里改片段**（P6）：顶栏 `＋` 新建（快捷键 `N`）、卡片右下角 `✎` 编辑（`E`）。两种模式——**表单**覆盖 vars / steps / meta 全字段（保存会重排 YAML），**原文**直接改 YAML 文本（逐字落盘，注释和排版都留住）。改 `id` 会自动搬文件；「另存副本」按 `<id>-copy` 新建；删除进 `snippets/.trash/`。编辑期间文件被别人改过会 409，不静默覆盖
 - **写命令不用背格式**：`run` 步骤先选动作（打开快捷方式 / 运行程序 / AHK 脚本 / shell / runlog / 状态 / 实例操作 / 点击），再填这个动作真正需要的字段；选「刷新状态」一个框都没有。YAML 里存的仍是那一行命令，老片段照常跑
+- **实例表不用跑片段**（P7.1）：顶栏 `bridge up · N` 或左栏「实例 N」直接打开只读表。服务端**直接读** `instances.txt` / `status.txt`，不写 `command.txt`、不占串行队列；标 `实时 / 可能过期 / 离线`，提权进程的 pid 用 `EPERM` 当活着。只有通过桥启动的窗口（`lnk` / `run` / `shell`）才会在表里
+- **运行表单里选实例**（P7.2）：`close` / `kill` / `focus` / `click` 的槽位自动变成下拉（`{{pro}}#{{n}}` / `{{slot}}` / `{{pro}}#1`），选中只写变量、命令模板不动；「手动输入」永远保留，列表空 / 接口失败直接退回输入框。编辑器里的槽位输入也带实例 datalist。服务端从 `run.cmd` 推导，YAML 不加字段
+- **启动程序时选程序**（P7.3）：`open-program` 的程序名变成「搜索 + 分组下拉」。列表来自 **`PROG_DIR` + 开始菜单 + 桌面 + 额外目录**（`.lnk`，外加额外目录里两层内的便携 `.exe`；60s 缓存），选中写的是 `.lnk` **绝对路径**——不依赖 `PROG_DIR` 配得对不对。便携 exe 会被包成带工作目录的 `.lnk`（放在 `data/program-links/`），所以启动时不会以 listener 的目录为工作目录。系统工具 / 卸载器 / 安装器 / 帮助文档默认隐藏，但顶部永远显示「已过滤 N 项」并能展开看原因；`⚙ → 程序列表` 里可以用 `only` 只保留你点名的那几个（等于一份带注释的程序清单）
 - **⚙ 里配目标**：`hosts.yaml` 的增 / 改 / 删也在设置里——名字、driver、bridge、shell、timeout、默认。改名即换键，`default` 排他；有片段引用或只剩最后一个可用目标时拒绝删除
-- **⚙ 里配桥**：`PROG_DIR`（找 `.lnk`）与 `AHK_DIR`（跑 `.ahk`）直接在设置弹窗里改，落 `data/settings.json`，服务下一条命令就注入给桥。留空 = 用桥自身的默认（桌面）
+- **⚙ 里配桥**：`PROG_DIR`（找 `.lnk`）与 `AHK_DIR`（跑 `.ahk`）直接在设置弹窗里改，落 `data/settings.json`，服务下一条命令就注入给桥。留空 = 不注入，桥用它自己那份的默认值（仓库版 `PROG_DIR` 是桌面；本机已安装版可能写死了别的目录，见 docs/04-phases.md §40.5）
 - **CLI**：任意 SSH 终端（Termius、手机、iPad）里 `snip run <id>`；`snip cat <id>` 看原文，`snip edit <id>` 用 `$EDITOR` 直接改
 - **执行目标**：`win-desktop`（exec 驱动，经 `ahk.bat` 驱动桌面 GUI）
 - **多目标执行**：卡片右上角 `⊕` 打开目标选择器；**同一个目标可以重复添加**——只有一台可执行机器时，这就是「同目标多开」，结果在抽屉里并列成 N 块面板，事件按目标分流
@@ -236,7 +239,7 @@ data/
 ## 测试
 
 ```bash
-npm test     # typecheck + lint + ps1 编码 + bridge 护栏 + 队列串行 + 命令保真度 + 环境注入 + 搜索 + expect + 导入 + 会话 + API 冒烟（冒烟 139 项）
+npm test     # typecheck + lint + ps1 编码 + bridge 护栏 + 队列串行 + 命令保真度 + 环境注入 + 搜索 + expect + 导入 + 桥文件 + 实例下拉 + 程序发现 + 会话 + API 冒烟（冒烟 176 项）
 ```
 
 单项：
@@ -248,16 +251,23 @@ npm run test:env    --workspace @snipdeck/drivers  # PROG_DIR / AHK_DIR 真的�
 npm run test:search --workspace @snipdeck/core     # 中文子串 / 多词 AND / 大小写与空白（14 项）
 npm run test:expect --workspace @snipdeck/core     # expect 三源 / 编码 / 正则预算 / 轮询等待（40 项）
 npm run test:import --workspace @snipdeck/core     # 历史清洗 / 残句识别 / 危险标记 / 不覆盖（60 项）
-npm run smoke       --workspace @snipdeck/server   # 打真路由：鉴权 / 404 / 脱敏 / CRUD / 设置 / 目标 / 真 SSE 执行（139 项）
-# CI 上没有 listener：SNIPDECK_SMOKE_BRIDGE=<不存在的目录> 会走「无桥模式」，跳过 5 条实跑，其余 111 条照跑
+npm run test:bridge --workspace @snipdeck/core     # 桥文件解析：instances/status、UTF-16、坏行、排序（27 项）
+npm run test:picks  --workspace @snipdeck/core     # 实例下拉识别：命令形态 / admin 前缀 / 冲突放弃（22 项）
+npm run test:programs --workspace @snipdeck/core   # 程序发现：分类 / 去重 / include / 配置归一 / 便携 exe（55 项，纯函数）
+npm run smoke       --workspace @snipdeck/server   # 打真路由：鉴权 / 404 / 脱敏 / CRUD / 设置 / 目标 / 实例表 / 程序列表 / 真 SSE 执行（176 项）
+# CI 上没有 listener：SNIPDECK_SMOKE_BRIDGE=<不存在的目录> 会走「无桥模式」，跳过 5 条实跑，其余 171 条照跑
+# 程序扫描同理：冒烟用 SNIPDECK_PROGRAMS_FIXTURE 指向固定 JSON，不去读 runner 的开始菜单
 npm run test:session --workspace @snipdeck/server   # 终端会话：PTY / resize / 删除真杀进程 / WS 鉴权
 npm run ui:shot -- http://127.0.0.1:7878/ 390 844 data/tmp/ui.png   # 移动端仿真截图 + 布局测量
-# 四个 ui:* 脚本都会从 .env 读 SNIP_TOKEN 注入页面；服务绑的是 100.x 时记得把地址传进去
+# ui:* 脚本都会从 .env 读 SNIP_TOKEN 注入页面；服务绑的是 100.x 时记得把地址传进去
 # ⚠️ 量布局请用 mobile: false（见 `npm run ui:editor`）：mobile: true 下 innerWidth 会落在真实窗口宽
+npm run ui:bridge                                  # 实例表：顶栏 / 左栏入口 + 只读弹窗（需服务 + 桥在线）
+npm run ui:picker                                  # 运行表单实例下拉：选中 → 预览命令（需服务 + 桥在线）
+npm run ui:program                                 # 运行表单程序下拉：搜索 / 分组 / 已过滤原因（17 项，需服务在线）
 npm run ui:queue                                   # 顶栏「排队 N」徽标可见性（需服务 + 桥都在线）
 npm run ui:multi                                   # 多目标：目标选择器 + 并列面板（需服务在线）
 npm run ui:history                                 # 运行历史：列表 + 抽屉回放（需服务在线）
-npm run ui:editor                                  # 片段编辑器：开/改/存/原文/副本/删（32 项，需服务在线）
+npm run ui:editor                                  # 片段编辑器：开/改/存/原文/副本/删 + 槽位 datalist（36 项，需服务在线）
 npm run ui:settings                                # 设置页：桥目录 / 运行档案 / 目标增删改（30 项，需服务在线）
 npm run test:session-reap                          # 会话回收，**真 60 秒**两条路径（约 70s，不进 npm test）
 npm run lint                                       # eslint：只拦错，不排格式
@@ -270,11 +280,11 @@ npm run clean:tmp                                  # 清 data/tmp 里 7 天前�
 
 计划已拆成 8 份，**章节编号全局不变**（写「§14」就是 `docs/03-reference.md` 第 14 节）：
 
-- [SnipDeck-PLAN.md](./SnipDeck-PLAN.md) — 总览：文档地图、修订摘要、进度快照
+- [docs/SnipDeck-PLAN.md](./docs/SnipDeck-PLAN.md) — 总览：文档地图、修订摘要、进度快照
 - [docs/01-design.md](./docs/01-design.md) — 架构、驱动能力边界、数据模型、运行时（§1–§8）
 - [docs/02-roadmap.md](./docs/02-roadmap.md) — 路线图与验收、风险、安全模型、待定项（§9–§12）
 - [docs/03-reference.md](./docs/03-reference.md) — 迁移清单、接口契约、字段参考、部署（§13–§16）
-- [docs/04-phases.md](./docs/04-phases.md) — 各期实施记录与取舍（§17–§39）
+- [docs/04-phases.md](./docs/04-phases.md) — 各期实施记录与取舍（§17–§43）
 - [docs/06-terminal.md](./docs/06-terminal.md) — 网页终端的设计与验收（§23–§29）
 - [docs/00-issues.md](./docs/00-issues.md) — ISSUE-001~028 现场记录与修复（§0.2–§0.9）
 - [docs/05-changelog.md](./docs/05-changelog.md) — 变更日志
