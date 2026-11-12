@@ -1849,3 +1849,34 @@ button.badge:hover {
 
   .run-modal__hint { display: none; }
 }
+
+/* 阶段 C3（HTTPS 计划）：设置弹窗里的 token 配对二维码 */
+.qr-pairing {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--ui-border, #2a2a28);
+  text-align: center;
+}
+.qr-pairing h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.qr-img {
+  width: 200px;
+  height: 200px;
+  margin: 10px auto;
+  display: block;
+  border-radius: var(--ui-radius, 8px);
+  background: #fff;
+  padding: 6px;
+  box-sizing: border-box;
+}
+.qr-url {
+  font-size: 11px;
+  color: var(--ui-text-faint, #9a948a);
+  word-break: break-all;
+  max-width: 320px;
+  margin: 4px auto 0;
+  line-height: 1.5;
+}

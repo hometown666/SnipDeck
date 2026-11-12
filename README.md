@@ -75,13 +75,13 @@ npm run snip -- run check-instence
 
 ```bash
 npm run build:web                                              # 前端产物，由 server 直接托管
-SNIPDECK_HOST=100.x.x.x SNIP_TOKEN=<32位随机串> npm run dev:server
+npm run dev:server                                            # 本机：http://127.0.0.1:7878（默认绑定）
 ```
 
-- **本机**：`http://127.0.0.1:7878`
-- **手机**：`http://100.x.x.x:7878`，首次要粘一次 token（三步走见「手机 / PWA」）
+- **本机**：`http://127.0.0.1:7878`（默认绑定，无需 token）
+- **手机**：走 `tailscale serve` 的 HTTPS 端点（见「HTTPS 访问」），扫码配对免手填 token；旧的明文 `http://100.x:7878` 直连方式已不推荐
 - **常驻**：见「常驻运行」，注册成登录自启的计划任务
-- `SNIPDECK_HOST` 不是 loopback 时**必须**设 `SNIP_TOKEN`，否则服务拒绝启动
+- 想让服务绑非 loopback（直接暴露 Tailscale IP）时才需要 `SNIP_TOKEN`；推荐改用 serve 模型（绑 `127.0.0.1` + 外层 TLS），见「HTTPS 访问」
 
 ## 桌面端
 
@@ -117,6 +117,26 @@ SNIPDECK_HOST=100.x.x.x SNIP_TOKEN=<32位随机串> npm run dev:server
 
 > **关于离线**：service worker 只在安全上下文注册。经 `http://100.x` 访问时浏览器会跳过，  
 > 此时是「快捷方式」而不是完整 PWA；要离线缓存与安装提示，需要 `tailscale serve` 上 HTTPS。
+
+## HTTPS 访问（tailscale serve）
+
+经 `http://100.x:7878` 直连能用，但「加到主屏」只是快捷方式（没离线缓存、没通知）。  
+要真 PWA + 扫码配对，最省事的是 **`tailscale serve`**：证书 Tailscale 托管，不用自签。
+
+1. 把服务退回本机绑定并（可选）换新 token：
+   ```bash
+   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/set-token.ps1 -Rotate -HostAddress 127.0.0.1
+   # 不想换 token 就去掉 -Rotate；-Show 只查看不改写
+   ```
+   这条脚本写 `.env` 的 `SNIP_TOKEN` / `SNIPDECK_HOST`（保留注释与 `SNIPDECK_PORT`），并在末尾打印出新 token。改完**重启服务**让它绑 `127.0.0.1`。
+2. TLS 终结（在装了 tailscale 的机器上一次）：
+   ```bash
+   tailscale serve https / https://<machine>.ts.net
+   ```
+   自动把 `https://<machine>.ts.net` 转发到本机 `http://127.0.0.1:7878`。
+3. **切流**：先确认手机走 `https://<machine>.ts.net` 能拿页面、`wss` 通，再弃用旧的明文 `http://100.x:7878`。
+4. **扫码配对**：打开网页 ⚙，设置弹窗里有「配对二维码」——它把 `https://<本机地址>/?token=<token>` 编成图，手机扫一下直接带 token 进，免手填。也支持直接发带 `?token=` 的链接（前端入口会自动写入 localStorage 后把 token 从地址栏抹掉）。
+   > 服务退回 `127.0.0.1` 后，启动守卫不再要求 token（守卫只拦「非 loopback 且无 token」）；此时安全来自「serve 这一层」+ 共享 token 双层。**绝不对公网做端口映射**——WS 的 token 走 query，会进 serve 的访问日志，靠 tailnet 私有网络 + token 纵深缓解。
 
 ## 写一条片段
 

@@ -142,7 +142,11 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
   let bridgeSettings: BridgeSettings = loadSettings(settingsFile)
   const extraEnv = () => envOf(bridgeSettings)
 
-  const app = Fastify({ logger: opts.logger ?? true })
+  const app = Fastify({ logger: opts.logger ?? true, trustProxy: true })
+  // 阶段 B1（HTTPS 计划，docs/08-https.md）：服务前顶了 tailscale serve / 反代，
+  // 必须让 Fastify 信任 X-Forwarded-*，否则日志与 run meta 里的 req.ip 永远是 127.0.0.1。
+  // **只影响日志**：鉴权从不看 req.ip（方案 D 已删来源豁免，见上方 onRequest），
+  // 所以信任反代头不会放开任何授权判断。
   const store = new SnippetStore(snippetsDir)
   store.watchDir()
   // let 而不是 const：网页上改完目标后直接换掉这一份，省得每条请求都读盘
@@ -742,7 +746,23 @@ export function buildApp(opts: BuildAppOptions = {}): BuiltApp {
   })
 
   if (existsSync(webDist)) {
-    app.register(fastifyStatic, { root: webDist })
+    app.register(fastifyStatic, {
+      root: webDist,
+      cacheControl: false, // 交给下方 setHeaders 统一设置（否则内置默认会覆盖）
+      // iOS Safari 对带 `crossorigin` 的 module script 会做 CORS 检查；同源静态资源若没有
+      // ACAO 头，iOS 会拒绝执行脚本 → 真机白屏（桌面 Chrome 对同源 module 不要求 ACAO）。
+      // 这里给所有前端静态资源补 Access-Control-Allow-Origin，消除该差异。
+      // 另：HTML 标 no-cache（避免旧 index.html 长期驻留手机缓存、引用错资源），
+      // 带 hash 的资源标 immutable（内容寻址，永不过期）。防止「手机缓存了白屏期的残缺响应」。
+      setHeaders: (res, filePath) => {
+        res.setHeader('access-control-allow-origin', '*')
+        const noCache = /\.(html|webmanifest)$/.test(filePath)
+        res.setHeader(
+          'cache-control',
+          noCache ? 'no-cache' : 'public, max-age=31536000, immutable',
+        )
+      },
+    })
     // 只让前端路由回退到 index.html；/api/* 的未知路径必须返回 JSON 404，
     // 否则前端拿到一段 HTML 会当成成功响应去 JSON.parse。
     app.setNotFoundHandler((req, reply) => {
